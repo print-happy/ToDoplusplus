@@ -1,6 +1,6 @@
 import React, { createContext, useState, useContext, useEffect } from 'react';
 import axios from 'axios';
-import { clearSessionApiKeyCache } from '../utils/apiKeyManager';
+import { clearSessionApiKeyCache, monitorApiKeySecurity } from '../utils/apiKeyManager';
 
 interface AuthContextType {
   user: any;
@@ -31,6 +31,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     if (savedUser && token) {
       try {
         setUser(JSON.parse(savedUser));
+        // 🔒 用户状态恢复后进行安全监控
+        setTimeout(() => monitorApiKeySecurity(), 100);
       } catch (error) {
         console.error('Failed to parse saved user:', error);
       }
@@ -47,8 +49,22 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const login = async (email: string, password: string) => {
     try {
-      // 🔒 安全预清理：清除任何现有的会话级API密钥缓存
+      // 🚨 紧急安全修复：登录前完全清理之前用户的数据
+      console.log('🚨 SECURITY: Starting complete data cleanup for user login');
+
+      // 1. 清除会话级API密钥缓存
       clearSessionApiKeyCache();
+
+      // 2. 清除之前用户的认证信息
+      setUser(null);
+      setToken(null);
+      delete axios.defaults.headers.common['Authorization'];
+
+      // 3. 清除可能残留的用户数据
+      localStorage.removeItem('user');
+      localStorage.removeItem('token');
+
+      console.log('🔒 Data cleanup completed for user login');
 
       // 尝试真实的后端登录
       try {
@@ -61,50 +77,70 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         setToken(token);
         localStorage.setItem('token', token);
         localStorage.setItem('user', JSON.stringify(user));
+        axios.defaults.headers.common['Authorization'] = `Bearer ${token}`;
         console.log('🔒 User logged in securely via backend');
+        // 🔒 登录后进行安全监控
+        setTimeout(() => monitorApiKeySecurity(), 100);
         return;
       } catch (backendError) {
         console.log('Backend login failed, using mock login:', backendError);
       }
 
-      // 后端不可用时的模拟登录
+      // 🔧 后端不可用时的模拟登录（修复版）
       if (email && password) {
-        // 检查本地注册的用户
+        console.log('🔧 Starting mock login verification for:', email);
+
+        // 🔧 获取注册用户列表
         const registeredUsers = JSON.parse(localStorage.getItem('registeredUsers') || '[]');
+        console.log('📋 Found registered users:', registeredUsers.length);
+
+        // 🔧 查找用户账户
         const registeredUser = registeredUsers.find((user: any) =>
-          user.email === email && user.password === password
+          user.email === email || user.username === email
         );
 
-        if (registeredUser) {
-          // 使用注册的用户信息
-          const mockUser = {
-            _id: 'mock-user-' + Date.now(),
-            name: registeredUser.username,
-            username: registeredUser.username,
-            email: registeredUser.email,
-          };
-          const mockToken = 'mock-jwt-token-' + Date.now();
-
-          setUser(mockUser);
-          setToken(mockToken);
-          localStorage.setItem('token', mockToken);
-          localStorage.setItem('user', JSON.stringify(mockUser));
-          return;
+        if (!registeredUser) {
+          console.log('❌ Login failed: Account not found');
+          throw new Error('账户不存在，请检查邮箱地址或先注册账户');
         }
 
-        // 如果没有注册用户，允许任何邮箱密码组合（演示模式）
-        const mockUser = {
-          _id: 'mock-user-demo',
-          name: email.split('@')[0] || 'username',
-          username: email.split('@')[0] || 'username',
-          email: email,
-        };
-        const mockToken = 'mock-jwt-token-' + Date.now();
+        // 🔧 验证密码
+        if (registeredUser.password !== password) {
+          console.log('❌ Login failed: Incorrect password');
+          throw new Error('密码错误，请重新输入');
+        }
 
+        // 🔧 登录成功：创建用户会话
+        console.log('✅ Login credentials verified, creating session');
+
+        // 使用注册时的用户ID，确保数据一致性
+        const userId = registeredUser.id || `user-${email.replace(/[^a-zA-Z0-9]/g, '-')}-${Date.now()}`;
+
+        const mockUser = {
+          _id: userId,
+          name: registeredUser.username,
+          username: registeredUser.username,
+          email: registeredUser.email,
+          registeredAt: registeredUser.registeredAt,
+        };
+        const mockToken = `token-${userId}-${Date.now()}`;
+
+        // 🔧 更新最后登录时间
+        registeredUser.lastLogin = new Date().toISOString();
+        localStorage.setItem('registeredUsers', JSON.stringify(registeredUsers));
+
+        // 🔧 设置用户会话
         setUser(mockUser);
         setToken(mockToken);
         localStorage.setItem('token', mockToken);
         localStorage.setItem('user', JSON.stringify(mockUser));
+        axios.defaults.headers.common['Authorization'] = `Bearer ${mockToken}`;
+
+        console.log(`✅ User logged in successfully (mock): ${email}`);
+        console.log('User ID:', userId);
+
+        // 🔒 登录后进行安全监控
+        setTimeout(() => monitorApiKeySecurity(), 100);
         return;
       }
 
@@ -116,8 +152,30 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const register = async (username: string, email: string, password: string) => {
     try {
-      // 🔒 安全预清理：清除任何现有的会话级API密钥缓存
+      // 🚨 紧急安全修复：注册前完全清理所有数据
+      console.log('🚨 SECURITY: Starting complete data cleanup for new user registration');
+
+      // 1. 清除会话级API密钥缓存
       clearSessionApiKeyCache();
+
+      // 2. 清除所有localStorage数据（防止数据残留）
+      const keysToPreserve = ['theme', 'language']; // 保留非敏感设置
+      const allKeys = Object.keys(localStorage);
+      allKeys.forEach(key => {
+        if (!keysToPreserve.includes(key)) {
+          localStorage.removeItem(key);
+        }
+      });
+
+      // 3. 清除sessionStorage
+      sessionStorage.clear();
+
+      // 4. 重置当前用户状态
+      setUser(null);
+      setToken(null);
+      delete axios.defaults.headers.common['Authorization'];
+
+      console.log('🔒 Complete data cleanup completed for new user registration');
 
       // 尝试真实的后端注册
       try {
@@ -131,40 +189,68 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         setToken(token);
         localStorage.setItem('token', token);
         localStorage.setItem('user', JSON.stringify(user));
+        axios.defaults.headers.common['Authorization'] = `Bearer ${token}`;
         console.log('🔒 User registered securely via backend');
         return;
       } catch (backendError) {
         console.log('Backend registration failed, using mock registration:', backendError);
       }
 
-      // 后端不可用时的模拟注册
+      // 🔧 后端不可用时的模拟注册（修复版）
       if (username && email && password) {
-        // 检查本地存储中是否已有相同用户名或邮箱
+        console.log('🔧 Starting mock registration for:', email);
+
+        // 🔧 检查本地存储中是否已有相同用户名或邮箱
         const existingUsers = JSON.parse(localStorage.getItem('registeredUsers') || '[]');
         const userExists = existingUsers.some((user: any) =>
           user.username === username || user.email === email
         );
 
         if (userExists) {
-          throw new Error('用户名或邮箱已被使用');
+          console.log('❌ Registration failed: User already exists');
+          throw new Error('该用户名或邮箱已被注册，请使用其他信息或直接登录');
         }
 
+        // 🔧 创建唯一用户ID
+        const userId = `user-${email.replace(/[^a-zA-Z0-9]/g, '-')}-${Date.now()}`;
+
+        // 🔧 创建完整的注册用户记录
+        const newRegisteredUser = {
+          id: userId,
+          username: username,
+          email: email,
+          password: password, // 注意：实际应用中应该加密
+          registeredAt: new Date().toISOString(),
+          lastLogin: null,
+        };
+
+        // 🔧 创建用户会话对象
         const mockUser = {
-          _id: 'mock-user-' + Date.now(),
+          _id: userId,
           username: username,
           name: username,
           email: email,
+          registeredAt: newRegisteredUser.registeredAt,
         };
-        const mockToken = 'mock-jwt-token-' + Date.now();
+        const mockToken = `token-${userId}-${Date.now()}`;
 
-        // 保存用户到本地注册列表
-        existingUsers.push({ username, email, password });
+        // 🔧 保存用户到本地注册列表
+        existingUsers.push(newRegisteredUser);
         localStorage.setItem('registeredUsers', JSON.stringify(existingUsers));
+        console.log('✅ User saved to registeredUsers list');
 
+        // 🔧 设置用户会话
         setUser(mockUser);
         setToken(mockToken);
         localStorage.setItem('token', mockToken);
         localStorage.setItem('user', JSON.stringify(mockUser));
+        axios.defaults.headers.common['Authorization'] = `Bearer ${mockToken}`;
+
+        console.log(`✅ Mock registration completed successfully for: ${email}`);
+        console.log('User ID:', userId);
+
+        // 🔒 注册后进行安全监控
+        setTimeout(() => monitorApiKeySecurity(), 100);
         return;
       }
 

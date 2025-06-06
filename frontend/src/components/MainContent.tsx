@@ -4,7 +4,8 @@ import axios from 'axios';
 import dayjs from 'dayjs';
 import { useAuth } from '../contexts/AuthContext';
 import Settings from './Settings';
-import { getApiKeyWithPrompt, sanitizeApiKeyForLogging, getAllUserApiKeys, clearAllApiKeys, testApiKeyIsolation } from '../utils/apiKeyManager';
+import { getApiKeyWithPrompt, sanitizeApiKeyForLogging, getAllUserApiKeys, clearAllApiKeys, testApiKeyIsolation, getApiKeyAccessLogs, clearApiKeyAccessLogs } from '../utils/apiKeyManager';
+import { emergencyCompleteCleanup, secureUserSwitchCleanup, performSecurityCheck, autoFixDataIsolation } from '../utils/emergencyCleanup';
 
 interface Todo {
   _id: string;
@@ -98,58 +99,120 @@ const MainContent: React.FC<MainContentProps> = ({ currentView, onTodosUpdate })
     }
   }, [user, getUserTodosKey]);
 
-  // 清理旧的共享数据（一次性迁移）
-  const cleanupLegacyData = useCallback(() => {
+  // 🚨 紧急安全修复：强制数据清理和隔离
+  const forceDataCleanup = useCallback(() => {
     try {
+      console.log('🚨 SECURITY: Starting force data cleanup');
+
+      // 1. 清理旧的共享数据
       const legacyTodos = localStorage.getItem('todos');
-      if (legacyTodos && user) {
-        console.log('🧹 Found legacy shared todos data, migrating to user-specific storage...');
-        const parsedLegacyTodos = JSON.parse(legacyTodos);
-
-        // 将旧数据迁移到当前用户
-        const userTodos = parsedLegacyTodos.map((todo: Todo) => ({
-          ...todo,
-          user: user._id || user.email || ''
-        }));
-
-        saveUserTodos(userTodos);
-
-        // 删除旧的共享数据
+      if (legacyTodos) {
+        console.log('🧹 Removing legacy shared todos data');
         localStorage.removeItem('todos');
-        console.log('✅ Legacy data migrated and cleaned up');
       }
+
+      // 2. 清理可能的跨用户数据污染
+      const allTodoKeys = Object.keys(localStorage).filter(key => key.startsWith('todos_'));
+      const currentUserId = user?._id || user?.email;
+
+      if (currentUserId) {
+        const currentUserKey = `todos_${currentUserId}`;
+        allTodoKeys.forEach(key => {
+          if (key !== currentUserKey) {
+            // 检查其他用户的数据是否被当前用户访问
+            try {
+              const otherUserTodos = JSON.parse(localStorage.getItem(key) || '[]');
+              const contaminatedTodos = otherUserTodos.filter((todo: Todo) =>
+                todo.user === currentUserId
+              );
+
+              if (contaminatedTodos.length > 0) {
+                console.log(`🚨 SECURITY: Found ${contaminatedTodos.length} contaminated todos in ${key}`);
+                // 移除被污染的数据
+                const cleanedTodos = otherUserTodos.filter((todo: Todo) =>
+                  todo.user !== currentUserId
+                );
+                localStorage.setItem(key, JSON.stringify(cleanedTodos));
+              }
+            } catch (error) {
+              console.error(`Error cleaning up ${key}:`, error);
+            }
+          }
+        });
+      }
+
+      console.log('✅ Force data cleanup completed');
     } catch (error) {
-      console.error('❌ Error during legacy data cleanup:', error);
+      console.error('❌ Error during force data cleanup:', error);
     }
-  }, [user, saveUserTodos]);
+  }, [user]);
 
   const initializeTodos = useCallback(() => {
     if (!user) {
       console.log('⏳ No user logged in, skipping todo initialization');
+      setTodos([]); // 🔒 确保无用户时清空todos
       setLoading(false);
       return;
     }
 
     setLoading(true);
-    console.log(`🚀 Initializing todos for user: ${user.email || user.username || user._id}`);
+    console.log(`🔧 Initializing todos for user: ${user.email || user.username || user._id}`);
+    console.log('🔧 User details:', { id: user._id, email: user.email, username: user.username });
 
     try {
-      // 获取当前用户的todos
+      // 🚨 安全修复：强制清空当前todos，防止显示其他用户数据
+      setTodos([]);
+
+      // 🔧 获取当前用户的todos
       const userTodos = getUserTodos();
+      console.log(`🔧 Retrieved ${userTodos.length} todos from storage for user`);
 
       if (userTodos.length > 0) {
-        setTodos(userTodos);
-        console.log(`✅ Loaded ${userTodos.length} existing todos for user`);
+        // 🔒 严格安全验证：确保所有todos都属于当前用户
+        const verifiedTodos = userTodos.filter((todo: Todo) => {
+          // 🔧 多重验证：检查用户ID、邮箱匹配
+          const belongsToUser = todo.user === user._id ||
+                               todo.user === user.email ||
+                               todo.user === user.username ||
+                               !todo.user; // 允许没有user字段的旧数据，但会在保存时修复
+
+          if (!belongsToUser) {
+            console.warn(`🚨 SECURITY: Found todo that doesn't belong to current user:`, {
+              todoId: todo._id,
+              todoUser: todo.user,
+              currentUser: user._id,
+              currentEmail: user.email
+            });
+          }
+
+          return belongsToUser;
+        });
+
+        // 🔧 为没有user字段的todos添加当前用户标识
+        const fixedTodos = verifiedTodos.map((todo: Todo) => ({
+          ...todo,
+          user: todo.user || user._id || user.email
+        }));
+
+        setTodos(fixedTodos);
+        console.log(`✅ Loaded ${fixedTodos.length} verified todos for user (filtered from ${userTodos.length})`);
+
+        // 🔧 如果发现数据问题或进行了修复，重新保存清理后的数据
+        if (fixedTodos.length !== userTodos.length ||
+            fixedTodos.some((todo: Todo, index: number) => todo.user !== userTodos[index]?.user)) {
+          console.log('🔒 Cleaning up and fixing user data');
+          saveUserTodos(fixedTodos);
+        }
       } else {
-        // 新用户：创建空的todos列表
-        console.log('🆕 New user detected, starting with empty todo list');
+        // 🔧 新用户或无数据：创建空的todos列表
+        console.log('🆕 New user or no existing data, starting with empty todo list');
         setTodos([]);
         saveUserTodos([]);
       }
     } catch (error) {
       message.error('初始化待办事项失败');
       console.error('❌ Initialize todos error:', error);
-      setTodos([]);
+      setTodos([]); // 🔒 出错时确保清空todos
     }
     setLoading(false);
   }, [user, getUserTodos, saveUserTodos]);
@@ -188,13 +251,13 @@ const MainContent: React.FC<MainContentProps> = ({ currentView, onTodosUpdate })
   }, [token, user, API_URL, saveUserTodos]);
 
   useEffect(() => {
-    // 首先清理旧的共享数据
-    cleanupLegacyData();
+    // 🚨 紧急安全修复：用户变化时强制执行数据清理
+    forceDataCleanup();
     // 然后初始化用户专属数据
     initializeTodos();
     // 可选：尝试与后端同步（不阻塞本地功能）
     syncWithBackend();
-  }, [cleanupLegacyData, initializeTodos, syncWithBackend]);
+  }, [forceDataCleanup, initializeTodos, syncWithBackend]);
 
   // Notify parent component when todos change
   useEffect(() => {
@@ -292,6 +355,220 @@ const MainContent: React.FC<MainContentProps> = ({ currentView, onTodosUpdate })
           }
 
           return securityReport;
+        },
+        getApiKeyAccessLogs: () => {
+          const logs = getApiKeyAccessLogs();
+          console.log('🔒 API Key Access Logs:', logs);
+          return logs;
+        },
+        clearApiKeyAccessLogs: () => {
+          clearApiKeyAccessLogs();
+          console.log('🧹 API key access logs cleared');
+        },
+        securityAudit: () => {
+          console.log('🔍 Comprehensive Security Audit...');
+
+          const currentUser = user?.email || user?.username || 'anonymous';
+          const isolationResult = testApiKeyIsolation();
+          const dataResult = (window as any).todoDebug.testDataIsolation();
+          const accessLogs = getApiKeyAccessLogs();
+
+          // 分析访问日志中的安全问题
+          const securityIssues = accessLogs.filter(log => !log.success || log.securityNote?.includes('BREACH'));
+
+          const auditReport = {
+            timestamp: new Date().toISOString(),
+            currentUser,
+            apiKeySecurity: isolationResult,
+            dataSecurity: dataResult,
+            accessLogs: {
+              total: accessLogs.length,
+              recent: accessLogs.slice(-10),
+              securityIssues: securityIssues.length,
+              issues: securityIssues
+            },
+            overallSecurityStatus:
+              isolationResult.securityStatus.includes('BREACH') || securityIssues.length > 0
+                ? '🚨 SECURITY ISSUES DETECTED'
+                : '✅ SECURE',
+            recommendations: [] as string[]
+          };
+
+          // 生成安全建议
+          if (securityIssues.length > 0) {
+            auditReport.recommendations.push('Review and address security issues in access logs');
+          }
+          if (isolationResult.securityStatus.includes('BREACH')) {
+            auditReport.recommendations.push('Critical: Fix API key isolation breach immediately');
+          }
+          if (accessLogs.length === 0) {
+            auditReport.recommendations.push('Enable API key access logging for better security monitoring');
+          }
+
+          console.log('🔒 Security Audit Report:', auditReport);
+
+          if (auditReport.overallSecurityStatus.includes('ISSUES')) {
+            console.error('🚨 SECURITY ALERT: Issues detected in security audit!');
+          }
+
+          return auditReport;
+        },
+        // 🚨 紧急安全修复工具
+        emergencyCompleteCleanup: () => {
+          console.log('🚨 EMERGENCY: Initiating complete cleanup');
+          emergencyCompleteCleanup();
+        },
+        secureUserSwitchCleanup: (newUserId?: string) => {
+          console.log('🔒 SECURITY: Initiating secure user switch cleanup');
+          secureUserSwitchCleanup(newUserId);
+        },
+        performSecurityCheck: () => {
+          const currentUserId = user?.email || user?.username || user?._id;
+          if (!currentUserId) {
+            console.warn('⚠️ No current user for security check');
+            return { isSecure: false, issues: ['No current user'], recommendations: ['Login required'] };
+          }
+          return performSecurityCheck(currentUserId);
+        },
+        autoFixDataIsolation: () => {
+          const currentUserId = user?.email || user?.username || user?._id;
+          if (!currentUserId) {
+            console.warn('⚠️ No current user for auto-fix');
+            return false;
+          }
+          return autoFixDataIsolation(currentUserId);
+        },
+        // 🚨 终极安全验证
+        ultimateSecurityTest: () => {
+          console.log('🚨 ULTIMATE SECURITY TEST: Starting comprehensive security verification');
+
+          const currentUserId = user?.email || user?.username || user?._id;
+          if (!currentUserId) {
+            console.error('🚨 CRITICAL: No user logged in for security test');
+            return { status: 'CRITICAL_ERROR', message: 'No user logged in' };
+          }
+
+          // 1. 执行安全检查
+          const securityCheck = performSecurityCheck(currentUserId);
+
+          // 2. 执行数据隔离测试
+          const isolationTest = testApiKeyIsolation();
+
+          // 3. 执行数据完整性测试
+          const dataTest = (window as any).todoDebug.testDataIsolation();
+
+          // 4. 检查访问日志
+          const accessLogs = getApiKeyAccessLogs();
+          const securityIssues = accessLogs.filter(log => !log.success || log.securityNote?.includes('BREACH'));
+
+          const ultimateResult = {
+            timestamp: new Date().toISOString(),
+            currentUser: currentUserId,
+            securityCheck,
+            isolationTest,
+            dataTest,
+            accessLogs: {
+              total: accessLogs.length,
+              securityIssues: securityIssues.length,
+              issues: securityIssues
+            },
+            overallStatus:
+              !securityCheck.isSecure ||
+              isolationTest.securityStatus.includes('BREACH') ||
+              securityIssues.length > 0
+                ? '🚨 SECURITY BREACH DETECTED'
+                : '✅ SECURE',
+            criticalIssues: [
+              ...securityCheck.issues,
+              ...(isolationTest.securityStatus.includes('BREACH') ? ['API key isolation breach'] : []),
+              ...(securityIssues.length > 0 ? [`${securityIssues.length} access security issues`] : [])
+            ]
+          };
+
+          console.log('🔒 ULTIMATE SECURITY TEST RESULTS:', ultimateResult);
+
+          if (ultimateResult.overallStatus.includes('BREACH')) {
+            console.error('🚨 CRITICAL SECURITY ALERT: Multiple security breaches detected!');
+            console.error('🚨 IMMEDIATE ACTION REQUIRED: Consider emergency cleanup');
+          }
+
+          return ultimateResult;
+        },
+        // 🔧 用户认证调试工具
+        testUserAuthentication: () => {
+          console.log('🔧 Testing user authentication system');
+
+          const currentUser = user;
+          const registeredUsers = JSON.parse(localStorage.getItem('registeredUsers') || '[]');
+          const currentToken = localStorage.getItem('token');
+          const currentUserData = localStorage.getItem('user');
+
+          const authTest = {
+            timestamp: new Date().toISOString(),
+            currentUser: {
+              exists: !!currentUser,
+              id: currentUser?._id,
+              email: currentUser?.email,
+              username: currentUser?.username,
+            },
+            registeredUsers: {
+              total: registeredUsers.length,
+              users: registeredUsers.map((u: any) => ({
+                id: u.id,
+                email: u.email,
+                username: u.username,
+                registeredAt: u.registeredAt,
+                lastLogin: u.lastLogin,
+              })),
+            },
+            session: {
+              hasToken: !!currentToken,
+              hasUserData: !!currentUserData,
+              tokenValid: currentToken && currentToken.startsWith('token-'),
+            },
+            dataIsolation: {
+              userTodosKey: currentUser ? `todos_${currentUser._id || currentUser.email}` : null,
+              userApiKeyKey: currentUser ? `siliconflow_api_key_${currentUser._id || currentUser.email}` : null,
+            },
+          };
+
+          console.log('🔧 User Authentication Test Results:', authTest);
+          return authTest;
+        },
+        getUserRegistrationData: () => {
+          const registeredUsers = JSON.parse(localStorage.getItem('registeredUsers') || '[]');
+          console.log('📋 Registered Users:', registeredUsers);
+          return registeredUsers;
+        },
+        simulateLoginTest: (email: string, password: string) => {
+          console.log('🧪 Simulating login test for:', email);
+
+          const registeredUsers = JSON.parse(localStorage.getItem('registeredUsers') || '[]');
+          const foundUser = registeredUsers.find((u: any) => u.email === email || u.username === email);
+
+          const loginTest = {
+            email,
+            userExists: !!foundUser,
+            passwordMatch: foundUser ? foundUser.password === password : false,
+            userDetails: foundUser ? {
+              id: foundUser.id,
+              username: foundUser.username,
+              email: foundUser.email,
+              registeredAt: foundUser.registeredAt,
+            } : null,
+            expectedResult: foundUser && foundUser.password === password ? 'SUCCESS' :
+                           !foundUser ? 'USER_NOT_FOUND' : 'WRONG_PASSWORD',
+          };
+
+          console.log('🧪 Login Test Results:', loginTest);
+          return loginTest;
+        },
+        clearUserData: () => {
+          console.log('🧹 Clearing all user data for testing');
+          localStorage.removeItem('registeredUsers');
+          localStorage.removeItem('user');
+          localStorage.removeItem('token');
+          console.log('✅ User data cleared');
         }
       };
       console.log('🛠️ Debug tools available: window.todoDebug');

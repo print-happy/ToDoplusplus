@@ -12,18 +12,49 @@ const Login: React.FC = () => {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+
+    // 🔧 输入验证
     if (!username || !password) {
-      message.error('请输入用户名和密码');
+      message.error('请输入邮箱/用户名和密码');
       return;
     }
 
     setLoading(true);
+    console.log('🔧 Attempting login for:', username);
+
     try {
       await login(username, password);
-      message.success('登录成功');
+      message.success('登录成功！欢迎回来');
+      console.log('✅ Login successful, navigating to todos');
       navigate('/todos');
-    } catch (error) {
-      message.error('登录失败，请检查用户名和密码');
+    } catch (error: any) {
+      // 🔧 详细错误处理：显示具体的错误信息
+      console.error('❌ Login failed:', error);
+
+      const errorMessage = error?.message || '登录失败，请重试';
+
+      // 🔧 根据错误类型显示不同的提示
+      if (errorMessage.includes('账户不存在')) {
+        message.error({
+          content: '账户不存在，请检查邮箱地址或先注册账户',
+          duration: 4,
+        });
+      } else if (errorMessage.includes('密码错误')) {
+        message.error({
+          content: '密码错误，请重新输入',
+          duration: 3,
+        });
+      } else if (errorMessage.includes('网络')) {
+        message.error({
+          content: '网络连接失败，请检查网络后重试',
+          duration: 4,
+        });
+      } else {
+        message.error({
+          content: errorMessage,
+          duration: 4,
+        });
+      }
     } finally {
       setLoading(false);
     }

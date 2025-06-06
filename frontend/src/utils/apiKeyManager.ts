@@ -15,6 +15,41 @@ let sessionApiKeyCache: {
   apiKey: null
 };
 
+// 🔒 API密钥访问日志（仅开发环境）
+interface ApiKeyAccessLog {
+  timestamp: string;
+  userId: string | null;
+  action: 'GET' | 'STORE' | 'REMOVE' | 'CLEAR';
+  success: boolean;
+  securityNote?: string;
+}
+
+let apiKeyAccessLogs: ApiKeyAccessLog[] = [];
+
+/**
+ * 🔒 记录API密钥访问日志
+ */
+const logApiKeyAccess = (action: ApiKeyAccessLog['action'], success: boolean, securityNote?: string): void => {
+  if (process.env.NODE_ENV !== 'development') return;
+
+  const log: ApiKeyAccessLog = {
+    timestamp: new Date().toISOString(),
+    userId: getCurrentUserId(),
+    action,
+    success,
+    securityNote
+  };
+
+  apiKeyAccessLogs.push(log);
+
+  // 保持最近100条日志
+  if (apiKeyAccessLogs.length > 100) {
+    apiKeyAccessLogs = apiKeyAccessLogs.slice(-100);
+  }
+
+  console.log(`🔒 API Key Access Log:`, log);
+};
+
 /**
  * Gets current user ID for API key management
  */
@@ -49,6 +84,7 @@ const getUserApiKeyStorageKey = (): string => {
  */
 export const clearSessionApiKeyCache = (): void => {
   console.log('🔒 Clearing session API key cache for security');
+  logApiKeyAccess('CLEAR', true, 'Session cache cleared for security');
   sessionApiKeyCache = {
     userId: null,
     apiKey: null
@@ -114,9 +150,11 @@ export const storeApiKey = (apiKey: string): boolean => {
     };
 
     console.log(`🔒 API key stored securely for user: ${currentUserId}`);
+    logApiKeyAccess('STORE', true, `API key stored for user: ${currentUserId}`);
     return true;
   } catch (error) {
     console.error('❌ Failed to store API key:', error);
+    logApiKeyAccess('STORE', false, `Failed to store API key: ${error}`);
     clearSessionApiKeyCache();
     return false;
   }
@@ -134,6 +172,7 @@ export const getApiKey = (): string | null => {
     if (!currentUserId) {
       clearSessionApiKeyCache();
       console.log('🔒 No user logged in, API key access denied');
+      logApiKeyAccess('GET', false, 'No user logged in');
       return null;
     }
 
@@ -195,9 +234,11 @@ export const getApiKey = (): string | null => {
     };
 
     console.log('🔒 API key loaded and cached for current user session');
+    logApiKeyAccess('GET', true, `API key retrieved for user: ${currentUserId}`);
     return decodedKey;
   } catch (error) {
     console.error('❌ Failed to retrieve API key:', error);
+    logApiKeyAccess('GET', false, `Failed to retrieve API key: ${error}`);
     // 🔒 清除缓存并移除损坏的密钥
     clearSessionApiKeyCache();
     removeApiKey();
@@ -221,8 +262,10 @@ export const removeApiKey = (): void => {
     clearSessionApiKeyCache();
 
     console.log(`🔒 API key securely removed for user: ${currentUserId || 'anonymous'}`);
+    logApiKeyAccess('REMOVE', true, `API key removed for user: ${currentUserId || 'anonymous'}`);
   } catch (error) {
     console.error('❌ Failed to remove API key:', error);
+    logApiKeyAccess('REMOVE', false, `Failed to remove API key: ${error}`);
     // 确保缓存被清除
     clearSessionApiKeyCache();
   }
@@ -300,16 +343,33 @@ export const testApiKey = async (apiKey?: string): Promise<ApiKeyValidationResul
 };
 
 /**
- * Gets API key with user prompt if not configured
+ * 🔒 安全获取API密钥（带用户提示）
+ * Gets API key with user prompt if not configured - with enhanced security
  */
 export const getApiKeyWithPrompt = (): string | null => {
-  const apiKey = getApiKey();
-  
-  if (!apiKey) {
-    console.warn('⚠️ No API key configured. Please configure your SiliconFlow API key in settings.');
+  const currentUserId = getCurrentUserId();
+
+  // 🔒 严格安全检查：必须有用户登录
+  if (!currentUserId) {
+    console.error('🔒 SECURITY: Cannot access API key - no user logged in');
     return null;
   }
-  
+
+  const apiKey = getApiKey();
+
+  if (!apiKey) {
+    console.warn(`⚠️ No API key configured for user: ${currentUserId}. Please configure your SiliconFlow API key in settings.`);
+    return null;
+  }
+
+  // 🔒 额外验证：确保返回的API密钥属于当前用户
+  if (sessionApiKeyCache.userId !== currentUserId) {
+    console.error('🔒 SECURITY BREACH DETECTED: API key user mismatch!');
+    clearSessionApiKeyCache();
+    return null;
+  }
+
+  console.log(`🔒 API key securely accessed for user: ${currentUserId}`);
   return apiKey;
 };
 
@@ -382,6 +442,75 @@ export const clearAllApiKeys = (): void => {
   clearSessionApiKeyCache();
 
   console.log(`🧹 Cleared ${allKeys.length} API keys from storage and session cache`);
+};
+
+/**
+ * 🔒 获取API密钥访问日志（仅开发环境）
+ * Get API key access logs for security auditing
+ */
+export const getApiKeyAccessLogs = (): ApiKeyAccessLog[] => {
+  if (process.env.NODE_ENV !== 'development') {
+    console.warn('⚠️ getApiKeyAccessLogs is only available in development mode');
+    return [];
+  }
+
+  return [...apiKeyAccessLogs];
+};
+
+/**
+ * 🔒 清除API密钥访问日志（仅开发环境）
+ * Clear API key access logs
+ */
+export const clearApiKeyAccessLogs = (): void => {
+  if (process.env.NODE_ENV !== 'development') {
+    console.warn('⚠️ clearApiKeyAccessLogs is only available in development mode');
+    return;
+  }
+
+  apiKeyAccessLogs = [];
+  console.log('🧹 API key access logs cleared');
+};
+
+/**
+ * 🔒 实时安全监控：检查API密钥安全状态
+ * Real-time security monitoring for API key security
+ */
+export const monitorApiKeySecurity = (): void => {
+  if (process.env.NODE_ENV !== 'development') return;
+
+  const currentUserId = getCurrentUserId();
+  const securityIssues: string[] = [];
+
+  // 检查1：用户登录状态与缓存一致性
+  if (!currentUserId && sessionApiKeyCache.apiKey !== null) {
+    securityIssues.push('🚨 CRITICAL: Session cache contains API key but no user logged in');
+  }
+
+  // 检查2：缓存用户ID与当前用户一致性
+  if (currentUserId && sessionApiKeyCache.userId && sessionApiKeyCache.userId !== currentUserId) {
+    securityIssues.push('🚨 CRITICAL: Session cache user ID mismatch');
+  }
+
+  // 检查3：localStorage中是否存在旧的全局API密钥
+  const oldGlobalKey = localStorage.getItem('siliconflow_api_key');
+  if (oldGlobalKey) {
+    securityIssues.push('⚠️ WARNING: Old global API key found in localStorage');
+  }
+
+  // 检查4：检查是否有多个用户的API密钥
+  const allUserKeys = Object.keys(localStorage).filter(key =>
+    key.startsWith(API_KEY_STORAGE_PREFIX)
+  );
+  if (allUserKeys.length > 3) {
+    securityIssues.push(`ℹ️ INFO: Multiple user API keys detected (${allUserKeys.length} users)`);
+  }
+
+  if (securityIssues.length > 0) {
+    console.warn('🔒 Security Monitor Alert:', securityIssues);
+    logApiKeyAccess('GET', false, `Security issues detected: ${securityIssues.join(', ')}`);
+  } else {
+    console.log('🔒 Security Monitor: All checks passed');
+  }
 };
 
 /**
