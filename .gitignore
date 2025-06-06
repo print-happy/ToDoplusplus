@@ -1,0 +1,149 @@
+# TODO++ Root .gitignore
+# This file provides comprehensive security coverage for the entire repository
+
+# Dependencies
+node_modules/
+*/node_modules/
+
+# Build outputs
+build/
+dist/
+*/build/
+*/dist/
+
+# Environment files - CRITICAL SECURITY
+.env
+.env.*
+.env.local
+.env.development
+.env.production
+.env.staging
+.env.test
+*/.env
+*/.env.*
+
+# API Keys and Secrets - CRITICAL SECURITY
+config/api-keys.json
+config/secrets.json
+src/config/api-keys.ts
+src/config/secrets.ts
+*/config/api-keys.json
+*/config/secrets.json
+*/src/config/api-keys.ts
+*/src/config/secrets.ts
+api-keys.json
+secrets.json
+*.key
+*.pem
+*.p12
+*.crt
+*.csr
+
+# Cache and temporary files
+.cache/
+*.cache
+.tmp/
+tmp/
+temp/
+.temp/
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+lerna-debug.log*
+logs/
+*.log.*
+
+# Runtime data
+pids/
+*.pid
+*.seed
+*.pid.lock
+
+# Coverage directory used by tools like istanbul
+coverage/
+*.lcov
+.nyc_output/
+
+# Editor directories and files
+.idea/
+.vscode/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+*~
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Security audit files
+security-audit.txt
+audit-report.txt
+
+# Backup files
+*.bak
+*.backup
+*.old
+*.orig
+
+# Database files (if any)
+*.db
+*.sqlite
+*.sqlite3
+
+# Compiled binary addons
+build/Release/
+
+# Dependency directories
+jspm_packages/
+
+# Optional npm cache directory
+.npm
+
+# Optional eslint cache
+.eslintcache
+
+# Optional REPL history
+.node_repl_history
+
+# Output of 'npm pack'
+*.tgz
+
+# Yarn Integrity file
+.yarn-integrity
+
+# parcel-bundler cache
+.parcel-cache/
+
+# Next.js build output
+.next/
+
+# Nuxt.js build / generate output
+.nuxt/
+
+# Gatsby files
+.cache/
+public/
+
+# Storybook build outputs
+.out/
+.storybook-out/
+
+# Temporary folders
+.tmp/
+.temp/
+
+# Local development files
+local.json
+local.config.js
+local.config.ts

@@ -24,6 +24,18 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [token, setToken] = useState<string | null>(localStorage.getItem('token'));
 
   useEffect(() => {
+    // 恢复用户信息
+    const savedUser = localStorage.getItem('user');
+    if (savedUser && token) {
+      try {
+        setUser(JSON.parse(savedUser));
+      } catch (error) {
+        console.error('Failed to parse saved user:', error);
+      }
+    }
+  }, [token]);
+
+  useEffect(() => {
     if (token) {
       axios.defaults.headers.common['Authorization'] = `Bearer ${token}`;
     } else {
@@ -33,14 +45,31 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const login = async (email: string, password: string) => {
     try {
-      const response = await axios.post('http://localhost:5000/api/auth/login', {
-        email,
-        password,
-      });
-      const { user, token } = response.data;
-      setUser(user);
-      setToken(token);
-      localStorage.setItem('token', token);
+      // 模拟登录用于演示
+      if (email && password) {
+        const mockUser = {
+          _id: 'mock-user-id',
+          name: email.split('@')[0] || 'username',
+          email: email,
+        };
+        const mockToken = 'mock-jwt-token-' + Date.now();
+
+        setUser(mockUser);
+        setToken(mockToken);
+        localStorage.setItem('token', mockToken);
+        localStorage.setItem('user', JSON.stringify(mockUser));
+        return;
+      }
+
+      // 实际的API调用（当后端可用时）
+      // const response = await axios.post('http://localhost:5000/api/auth/login', {
+      //   email,
+      //   password,
+      // });
+      // const { user, token } = response.data;
+      // setUser(user);
+      // setToken(token);
+      // localStorage.setItem('token', token);
     } catch (error) {
       throw new Error('登录失败');
     }
@@ -66,6 +95,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setUser(null);
     setToken(null);
     localStorage.removeItem('token');
+    localStorage.removeItem('user');
     delete axios.defaults.headers.common['Authorization'];
   };
 

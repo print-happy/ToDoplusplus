@@ -1,66 +1,251 @@
-import React from 'react';
-import { Form, Input, Button, Card, message } from 'antd';
-import { UserOutlined, LockOutlined } from '@ant-design/icons';
+import React, { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
+import { message } from 'antd';
 
 const Login: React.FC = () => {
   const { login } = useAuth();
   const navigate = useNavigate();
+  const [username, setUsername] = useState('');
+  const [password, setPassword] = useState('');
+  const [loading, setLoading] = useState(false);
 
-  const onFinish = async (values: { email: string; password: string }) => {
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!username || !password) {
+      message.error('请输入用户名和密码');
+      return;
+    }
+
+    setLoading(true);
     try {
-      await login(values.email, values.password);
+      await login(username, password);
       message.success('登录成功');
       navigate('/todos');
     } catch (error) {
-      message.error('登录失败，请检查邮箱和密码');
+      message.error('登录失败，请检查用户名和密码');
+    } finally {
+      setLoading(false);
     }
   };
 
   return (
-    <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#fff' }}>
-      <Card title="登录" bordered={false} style={{ borderRadius: 16, boxShadow: '0 4px 24px rgba(0,0,0,0.08)' }} headStyle={{ textAlign: 'center', fontSize: 28, fontWeight: 700 }}>
-        <Form
-          name="login"
-          initialValues={{ remember: true }}
-          onFinish={onFinish}
-          size="large"
-        >
-          <Form.Item
-            name="email"
-            rules={[
-              { required: true, message: '请输入邮箱' },
-              { type: 'email', message: '请输入有效的邮箱地址' }
-            ]}
-          >
-            <Input prefix={<UserOutlined />} placeholder="邮箱" style={{ height: 52, fontSize: 20, borderRadius: 12 }} />
-          </Form.Item>
-
-          <Form.Item
-            name="password"
-            rules={[{ required: true, message: '请输入密码' }]}
-          >
-            <Input.Password
-              prefix={<LockOutlined />}
-              placeholder="密码"
-              style={{ height: 52, fontSize: 20, borderRadius: 12 }}
-            />
-          </Form.Item>
-
-          <Form.Item>
-            <Button type="primary" htmlType="submit" block style={{ height: 48, fontSize: 20, borderRadius: 12, fontWeight: 600 }}>
-              登录
-            </Button>
-          </Form.Item>
-
-          <div style={{ textAlign: 'center' }}>
-            还没有账号？ <Link to="/register">立即注册</Link>
+    <div style={{
+      position: 'relative',
+      display: 'flex',
+      minHeight: '100vh',
+      flexDirection: 'column',
+      backgroundColor: '#f8fafc',
+      overflowX: 'hidden',
+      fontFamily: '"Plus Jakarta Sans", "Noto Sans", sans-serif'
+    }}>
+      <div style={{ display: 'flex', height: '100%', flexDirection: 'column', flexGrow: 1 }}>
+        <header style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          whiteSpace: 'nowrap',
+          borderBottom: '1px solid #e7eef3',
+          padding: '12px 40px'
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '16px', color: '#0d151b' }}>
+            <div style={{ width: '16px', height: '16px' }}>
+              <svg viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <path d="M6 6H42L36 24L42 42H6L12 24L6 6Z" fill="currentColor"></path>
+              </svg>
+            </div>
+            <h2 style={{
+              color: '#0d151b',
+              fontSize: '18px',
+              fontWeight: 'bold',
+              lineHeight: '1.2',
+              letterSpacing: '-0.015em',
+              margin: 0
+            }}>ToDo++</h2>
           </div>
-        </Form>
-      </Card>
+        </header>
+        <div style={{ padding: '20px 160px', display: 'flex', flex: 1, justifyContent: 'center' }}>
+          <div style={{
+            display: 'flex',
+            flexDirection: 'column',
+            width: '512px',
+            maxWidth: '512px',
+            padding: '20px 0',
+            flex: 1
+          }}>
+            <h2 style={{
+              color: '#0d151b',
+              fontSize: '28px',
+              fontWeight: 'bold',
+              lineHeight: '1.2',
+              padding: '20px 16px 12px',
+              textAlign: 'center',
+              margin: 0
+            }}>Welcome back</h2>
+            <form onSubmit={handleSubmit}>
+              <div style={{
+                display: 'flex',
+                maxWidth: '480px',
+                flexWrap: 'wrap',
+                alignItems: 'flex-end',
+                gap: '16px',
+                padding: '12px 16px'
+              }}>
+                <label style={{ display: 'flex', flexDirection: 'column', minWidth: '160px', flex: 1 }}>
+                  <p style={{
+                    color: '#0d151b',
+                    fontSize: '16px',
+                    fontWeight: '500',
+                    lineHeight: '1.5',
+                    paddingBottom: '8px',
+                    margin: 0
+                  }}>Username</p>
+                  <input
+                    placeholder="Enter your username"
+                    style={{
+                      display: 'flex',
+                      width: '100%',
+                      minWidth: 0,
+                      flex: 1,
+                      resize: 'none',
+                      overflow: 'hidden',
+                      borderRadius: '12px',
+                      color: '#0d151b',
+                      border: '1px solid #cfdce7',
+                      backgroundColor: '#f8fafc',
+                      height: '56px',
+                      padding: '15px',
+                      fontSize: '16px',
+                      fontWeight: 'normal',
+                      lineHeight: '1.5',
+                      outline: 'none'
+                    }}
+                    value={username}
+                    onChange={(e) => setUsername(e.target.value)}
+                    disabled={loading}
+                  />
+                </label>
+              </div>
+              <div style={{
+                display: 'flex',
+                maxWidth: '480px',
+                flexWrap: 'wrap',
+                alignItems: 'flex-end',
+                gap: '16px',
+                padding: '12px 16px'
+              }}>
+                <label style={{ display: 'flex', flexDirection: 'column', minWidth: '160px', flex: 1 }}>
+                  <p style={{
+                    color: '#0d151b',
+                    fontSize: '16px',
+                    fontWeight: '500',
+                    lineHeight: '1.5',
+                    paddingBottom: '8px',
+                    margin: 0
+                  }}>Password</p>
+                  <input
+                    type="password"
+                    placeholder="Enter your password"
+                    style={{
+                      display: 'flex',
+                      width: '100%',
+                      minWidth: 0,
+                      flex: 1,
+                      resize: 'none',
+                      overflow: 'hidden',
+                      borderRadius: '12px',
+                      color: '#0d151b',
+                      border: '1px solid #cfdce7',
+                      backgroundColor: '#f8fafc',
+                      height: '56px',
+                      padding: '15px',
+                      fontSize: '16px',
+                      fontWeight: 'normal',
+                      lineHeight: '1.5',
+                      outline: 'none'
+                    }}
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    disabled={loading}
+                  />
+                </label>
+              </div>
+              <div style={{ display: 'flex', padding: '12px 16px' }}>
+                <button
+                  type="submit"
+                  disabled={loading}
+                  style={{
+                    display: 'flex',
+                    minWidth: '84px',
+                    maxWidth: '480px',
+                    cursor: loading ? 'not-allowed' : 'pointer',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    overflow: 'hidden',
+                    borderRadius: '25px',
+                    height: '40px',
+                    padding: '0 16px',
+                    flex: 1,
+                    backgroundColor: '#1284e7',
+                    color: '#f8fafc',
+                    fontSize: '14px',
+                    fontWeight: 'bold',
+                    lineHeight: '1.5',
+                    letterSpacing: '0.015em',
+                    opacity: loading ? 0.5 : 1,
+                    border: 'none'
+                  }}
+                >
+                  <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {loading ? '登录中...' : 'Login'}
+                  </span>
+                </button>
+              </div>
+            </form>
+            <p style={{
+              color: '#4c759a',
+              fontSize: '14px',
+              fontWeight: 'normal',
+              lineHeight: '1.5',
+              paddingBottom: '12px',
+              paddingTop: '4px',
+              padding: '4px 16px 12px',
+              textAlign: 'center',
+              textDecoration: 'underline',
+              margin: 0
+            }}>
+              <Link
+                to="/register"
+                style={{
+                  color: '#4c759a',
+                  textDecoration: 'none'
+                }}
+                onMouseEnter={(e) => e.currentTarget.style.color = '#1284e7'}
+                onMouseLeave={(e) => e.currentTarget.style.color = '#4c759a'}
+              >
+                Don't have an account? Register
+              </Link>
+            </p>
+            <p style={{
+              color: '#4c759a',
+              fontSize: '14px',
+              fontWeight: 'normal',
+              lineHeight: '1.5',
+              paddingBottom: '12px',
+              paddingTop: '4px',
+              padding: '4px 16px 12px',
+              textAlign: 'center',
+              textDecoration: 'underline',
+              margin: 0,
+              cursor: 'pointer'
+            }}>
+              Forgot password?
+            </p>
+          </div>
+        </div>
+      </div>
     </div>
   );
 };
 
-export default Login; 
+export default Login;

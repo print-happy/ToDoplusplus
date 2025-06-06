@@ -15,6 +15,18 @@ npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 
+# Security - API keys and sensitive data
+.env.local
+.env.production
+.env.development
+config/api-keys.json
+config/secrets.json
+src/config/api-keys.ts
+src/config/secrets.ts
+*.key
+*.pem
+*.p12
+
 # editor
 .idea/
 .vscode/
