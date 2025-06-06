@@ -14,41 +14,46 @@ const Navbar: React.FC = () => {
     navigate('/login');
   };
 
+  const menuItems = [
+    {
+      key: '1',
+      label: <Link to="/todos">待办事项</Link>
+    },
+    {
+      key: 'views',
+      label: <Link to="/views">视图选项</Link>
+    },
+    {
+      key: 'countdown',
+      label: <Link to="/countdown">倒计时</Link>
+    },
+    ...(user ? [
+      {
+        key: '2',
+        label: <span>欢迎, {user.username}</span>,
+        style: { marginLeft: 'auto' }
+      },
+      {
+        key: '3',
+        label: <Button type="link" onClick={handleLogout}>退出</Button>
+      }
+    ] : [
+      {
+        key: '4',
+        label: <Link to="/login">登录</Link>,
+        style: { marginLeft: 'auto' }
+      },
+      {
+        key: '5',
+        label: <Link to="/register">注册</Link>
+      }
+    ])
+  ];
+
   return (
     <Header style={{ position: 'fixed', zIndex: 1, width: '100%' }}>
       <div className="logo" />
-      <Menu theme="light" mode="horizontal" defaultSelectedKeys={['1']}>
-        <Menu.Item key="1">
-          <Link to="/todos">待办事项</Link>
-        </Menu.Item>
-        <Menu.Item key="views">
-          <Link to="/views">视图选项</Link>
-        </Menu.Item>
-        <Menu.Item key="countdown">
-          <Link to="/countdown">倒计时</Link>
-        </Menu.Item>
-        {user ? (
-          <>
-            <Menu.Item key="2" style={{ marginLeft: 'auto' }}>
-              <span>欢迎, {user.username}</span>
-            </Menu.Item>
-            <Menu.Item key="3">
-              <Button type="link" onClick={handleLogout}>
-                退出
-              </Button>
-            </Menu.Item>
-          </>
-        ) : (
-          <>
-            <Menu.Item key="4" style={{ marginLeft: 'auto' }}>
-              <Link to="/login">登录</Link>
-            </Menu.Item>
-            <Menu.Item key="5">
-              <Link to="/register">注册</Link>
-            </Menu.Item>
-          </>
-        )}
-      </Menu>
+      <Menu theme="light" mode="horizontal" defaultSelectedKeys={['1']} items={menuItems} />
     </Header>
   );
 };

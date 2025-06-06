@@ -12,6 +12,7 @@ import todoRoutes from './routes/todo';
 // 环境变量配置
 dotenv.config();
 
+console.log('Starting server...');
 const app = express();
 
 // 中间件
@@ -34,7 +35,10 @@ app.use('/api/todos', todoRoutes);
 const MONGODB_URI = process.env.MONGODB_URI || 'mongodb://localhost:27017/todolist';
 mongoose.connect(MONGODB_URI)
   .then(() => console.log('Connected to MongoDB'))
-  .catch((err) => console.error('MongoDB connection error:', err));
+  .catch((err) => {
+    console.error('MongoDB connection error:', err);
+    console.log('Continuing without database connection for testing...');
+  });
 
 // 启动服务器
 const PORT = process.env.PORT || 5000;
