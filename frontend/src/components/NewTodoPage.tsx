@@ -16,6 +16,7 @@ interface Todo {
   xmlContent?: string;
   isAIGenerated?: boolean;
   isStarred?: boolean;
+  category?: string; // For custom lists
   createdAt?: string;
   updatedAt?: string;
 }

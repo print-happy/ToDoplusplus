@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { message } from 'antd';
 import axios from 'axios';
 import dayjs from 'dayjs';
@@ -17,6 +17,7 @@ interface Todo {
   xmlContent?: string;
   isAIGenerated?: boolean;
   isStarred?: boolean;
+  category?: string; // For custom lists
   createdAt?: string;
   updatedAt?: string;
 }
@@ -38,10 +39,14 @@ const MainContent: React.FC<MainContentProps> = ({ currentView, onTodosUpdate })
   const [showSettings, setShowSettings] = useState(false);
   const [showCustomDatePicker, setShowCustomDatePicker] = useState(false);
   const [customDate, setCustomDate] = useState('');
+  const [showCompletedSection, setShowCompletedSection] = useState(false);
+  const [showMoreOptions, setShowMoreOptions] = useState(false);
+  const [selectedTaskForDeletion, setSelectedTaskForDeletion] = useState<string | null>(null);
   const { user, token } = useAuth();
 
   const datePickerRef = useRef<HTMLDivElement>(null);
   const reminderPickerRef = useRef<HTMLDivElement>(null);
+  const moreOptionsRef = useRef<HTMLDivElement>(null);
 
   const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:5000/api';
 
@@ -150,6 +155,9 @@ const MainContent: React.FC<MainContentProps> = ({ currentView, onTodosUpdate })
       if (reminderPickerRef.current && !reminderPickerRef.current.contains(event.target as Node)) {
         setShowReminderPicker(false);
       }
+      if (moreOptionsRef.current && !moreOptionsRef.current.contains(event.target as Node)) {
+        setShowMoreOptions(false);
+      }
     };
 
     document.addEventListener('mousedown', handleClickOutside);
@@ -158,17 +166,7 @@ const MainContent: React.FC<MainContentProps> = ({ currentView, onTodosUpdate })
     };
   }, []);
 
-  const getViewTitle = (view: string) => {
-    const titles = {
-      'my-day': '我的一天',
-      'important': '重要',
-      'planned': '已计划',
-      'assigned': '已分配给我',
-      'flagged': '标记的电子邮件',
-      'tasks': '任务',
-    };
-    return titles[view as keyof typeof titles] || '已计划';
-  };
+
 
   const getViewIcon = (view: string) => {
     const icons = {
@@ -325,6 +323,7 @@ const MainContent: React.FC<MainContentProps> = ({ currentView, onTodosUpdate })
       status: 'pending' as const,
       isAIGenerated: false,
       isStarred: false,
+      category: currentView.startsWith('custom-') ? currentView : undefined,
     };
 
     // 立即添加到本地状态以提供即时反馈
@@ -438,6 +437,7 @@ const MainContent: React.FC<MainContentProps> = ({ currentView, onTodosUpdate })
               status: 'pending' as const,
               isAIGenerated: true,
               isStarred: false,
+              category: currentView.startsWith('custom-') ? currentView : undefined,
             }));
 
             // 添加到现有任务列表
@@ -467,6 +467,7 @@ const MainContent: React.FC<MainContentProps> = ({ currentView, onTodosUpdate })
               status: 'pending' as const,
               isAIGenerated: true,
               isStarred: false,
+              category: currentView.startsWith('custom-') ? currentView : undefined,
             };
 
             const updatedTodos = [...todos, newTodo];
@@ -496,6 +497,7 @@ const MainContent: React.FC<MainContentProps> = ({ currentView, onTodosUpdate })
             status: 'pending' as const,
             isAIGenerated: true,
             isStarred: false,
+            category: currentView.startsWith('custom-') ? currentView : undefined,
           };
 
           const updatedTodos = [...todos, newTodo];
@@ -573,12 +575,109 @@ const MainContent: React.FC<MainContentProps> = ({ currentView, onTodosUpdate })
     message.success('已重置所有设置');
   };
 
+  // 删除任务功能
+  const handleDeleteTask = (taskId: string) => {
+    setSelectedTaskForDeletion(taskId);
+  };
+
+  const confirmDeleteTask = () => {
+    if (!selectedTaskForDeletion) return;
+
+    const updatedTodos = todos.filter(t => t._id !== selectedTaskForDeletion);
+    setTodos(updatedTodos);
+    localStorage.setItem('todos', JSON.stringify(updatedTodos));
+
+    message.success('任务已删除');
+    setSelectedTaskForDeletion(null);
+    setShowMoreOptions(false);
+  };
+
+  const cancelDeleteTask = () => {
+    setSelectedTaskForDeletion(null);
+  };
+
   const theme = getThemeColors(currentView);
+
+  // Get view title for display
+  const getViewTitle = (view: string) => {
+    const titles = {
+      'my-day': '我的一天',
+      'important': '重要',
+      'planned': '已计划',
+      'assigned': '已分配给我',
+      'tasks': '任务'
+    };
+
+    // Check if it's a custom list
+    if (view.startsWith('custom-')) {
+      const customLists = JSON.parse(localStorage.getItem('customLists') || '[]');
+      const customList = customLists.find((list: any) => list.id === view);
+      return customList ? customList.name : '自定义列表';
+    }
+
+    return titles[view as keyof typeof titles] || '任务';
+  };
+
+  // Filter todos based on current view
+  const filteredTodos = useMemo(() => {
+    const today = dayjs().startOf('day');
+
+    switch (currentView) {
+      case 'my-day':
+        // Tasks due today
+        return todos.filter(todo => {
+          const dueDate = dayjs(todo.dueDate).startOf('day');
+          return dueDate.isSame(today, 'day');
+        });
+
+      case 'important':
+        // Only starred/important tasks
+        return todos.filter(todo => todo.isStarred);
+
+      case 'planned':
+        // Tasks with due dates (excluding overdue tasks)
+        return todos.filter(todo => {
+          const dueDate = dayjs(todo.dueDate).startOf('day');
+          return dueDate.isAfter(today) || dueDate.isSame(today, 'day');
+        });
+
+      case 'assigned':
+        // Tasks assigned to current user (all tasks for now since we don't have assignment logic)
+        return todos.filter(todo => todo.user === user?._id);
+
+      case 'tasks':
+        // All tasks
+        return todos;
+
+      default:
+        // Check if it's a custom list
+        if (currentView.startsWith('custom-')) {
+          // For custom lists, show tasks that have the custom list ID in their category
+          return todos.filter(todo => todo.category === currentView);
+        }
+        // Default to all tasks
+        return todos;
+    }
+  }, [todos, currentView, user]);
+
+  // Separate completed and pending tasks
+  const pendingTodos = useMemo(() =>
+    filteredTodos.filter(todo => todo.status === 'pending'),
+    [filteredTodos]
+  );
+
+  const completedTodos = useMemo(() =>
+    filteredTodos.filter(todo => todo.status === 'completed'),
+    [filteredTodos]
+  );
 
   // Debug function to test all functionality
   const runDebugTest = () => {
     console.log('🧪 Running debug test...');
     console.log('Current todos:', todos);
+    console.log('Filtered todos:', filteredTodos);
+    console.log('Pending todos:', pendingTodos);
+    console.log('Completed todos:', completedTodos);
     console.log('Selected date:', selectedDate);
     console.log('Reminder time:', reminderTime);
     console.log('New task input:', newTaskInput);
@@ -600,7 +699,7 @@ const MainContent: React.FC<MainContentProps> = ({ currentView, onTodosUpdate })
           <span className="material-icons" style={{ marginRight: '8px', color: theme[600], fontSize: '28px' }}>{getViewIcon(currentView)}</span>
           {getViewTitle(currentView)}
         </h1>
-        <div>
+        <div style={{ position: 'relative' }}>
           <button
             onClick={() => setShowSettings(true)}
             style={{
@@ -625,28 +724,97 @@ const MainContent: React.FC<MainContentProps> = ({ currentView, onTodosUpdate })
           >
             <span className="material-icons">settings</span>
           </button>
+
           <button
-            onClick={runDebugTest}
+            onClick={() => setShowMoreOptions(!showMoreOptions)}
             style={{
               color: '#6b7280',
               backgroundColor: 'transparent',
               border: 'none',
               cursor: 'pointer',
-              marginRight: '8px',
-              fontSize: '12px',
-              padding: '4px 8px',
-              borderRadius: '4px'
+              padding: '4px',
+              borderRadius: '4px',
+              transition: 'all 0.2s'
             }}
-            title="Debug Test"
+            title="更多选项"
+            onMouseEnter={(e) => {
+              e.currentTarget.style.backgroundColor = '#f3f4f6';
+              e.currentTarget.style.color = '#374151';
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.backgroundColor = 'transparent';
+              e.currentTarget.style.color = '#6b7280';
+            }}
           >
-            🧪
-          </button>
-          <button style={{ color: '#6b7280', backgroundColor: 'transparent', border: 'none', cursor: 'pointer', marginRight: '8px' }}>
             <span className="material-icons">more_horiz</span>
           </button>
-          <button style={{ color: '#6b7280', backgroundColor: 'transparent', border: 'none', cursor: 'pointer' }}>
-            <span className="material-icons">unfold_less</span>
-          </button>
+
+          {/* More Options Dropdown */}
+          {showMoreOptions && (
+            <div ref={moreOptionsRef} style={{
+              position: 'absolute',
+              top: '100%',
+              right: '0',
+              backgroundColor: 'white',
+              border: '1px solid #e5e7eb',
+              borderRadius: '8px',
+              padding: '8px',
+              boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)',
+              zIndex: 1000,
+              minWidth: '150px'
+            }}>
+              <button
+                onClick={runDebugTest}
+                style={{
+                  width: '100%',
+                  padding: '8px 12px',
+                  border: 'none',
+                  backgroundColor: 'transparent',
+                  borderRadius: '4px',
+                  cursor: 'pointer',
+                  fontSize: '14px',
+                  textAlign: 'left',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '8px'
+                }}
+                onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#f3f4f6'}
+                onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
+              >
+                <span>🧪</span>
+                调试测试
+              </button>
+
+              <button
+                onClick={() => {
+                  if (pendingTodos.length > 0) {
+                    handleDeleteTask(pendingTodos[0]._id);
+                  } else {
+                    message.warning('没有可删除的任务');
+                  }
+                }}
+                style={{
+                  width: '100%',
+                  padding: '8px 12px',
+                  border: 'none',
+                  backgroundColor: 'transparent',
+                  borderRadius: '4px',
+                  cursor: 'pointer',
+                  fontSize: '14px',
+                  textAlign: 'left',
+                  color: '#dc2626',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '8px'
+                }}
+                onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#fef2f2'}
+                onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
+              >
+                <span className="material-icons" style={{ fontSize: '16px' }}>delete</span>
+                删除待办
+              </button>
+            </div>
+          )}
         </div>
       </div>
 
@@ -656,12 +824,14 @@ const MainContent: React.FC<MainContentProps> = ({ currentView, onTodosUpdate })
           <div style={{ textAlign: 'center', padding: '32px 0' }}>
             <span style={{ color: '#6b7280' }}>加载中...</span>
           </div>
-        ) : todos.length === 0 ? (
+        ) : filteredTodos.length === 0 ? (
           <div style={{ textAlign: 'center', padding: '32px 0' }}>
             <span style={{ color: '#6b7280' }}>暂无任务</span>
           </div>
         ) : (
-          todos.map((todo) => (
+          <div>
+            {/* Pending Tasks */}
+            {pendingTodos.map((todo) => (
             <div key={todo._id} style={{
               display: 'flex',
               alignItems: 'center',
@@ -727,7 +897,103 @@ const MainContent: React.FC<MainContentProps> = ({ currentView, onTodosUpdate })
                 {todo.isStarred ? 'star' : 'star_border'}
               </button>
             </div>
-          ))
+          ))}
+
+            {/* Completed Tasks Section */}
+            {completedTodos.length > 0 && (
+          <div style={{ marginTop: '16px' }}>
+            <button
+              onClick={() => setShowCompletedSection(!showCompletedSection)}
+              style={{
+                width: '100%',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                padding: '12px',
+                backgroundColor: 'transparent',
+                border: 'none',
+                borderTop: '1px solid #e5e7eb',
+                cursor: 'pointer',
+                fontSize: '14px',
+                color: '#6b7280'
+              }}
+            >
+              <span style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <span className="material-icons" style={{ fontSize: '16px' }}>
+                  {showCompletedSection ? 'expand_less' : 'expand_more'}
+                </span>
+                已完成 ({completedTodos.length})
+              </span>
+            </button>
+
+            {showCompletedSection && (
+              <div style={{ paddingLeft: '12px' }}>
+                {completedTodos.map((todo) => (
+                  <div
+                    key={todo._id}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      padding: '8px 12px',
+                      borderRadius: '6px',
+                      marginBottom: '4px',
+                      backgroundColor: '#f9fafb',
+                      opacity: 0.7
+                    }}
+                  >
+                    <button
+                      onClick={() => toggleTodo(todo._id)}
+                      style={{
+                        backgroundColor: 'transparent',
+                        border: 'none',
+                        cursor: 'pointer',
+                        color: '#10b981',
+                        marginRight: '12px',
+                        padding: '4px',
+                        borderRadius: '50%',
+                        transition: 'all 0.2s'
+                      }}
+                      className="material-icons"
+                      title="标记为待办"
+                    >
+                      check_circle
+                    </button>
+                    <div style={{ flex: 1 }}>
+                      <p style={{
+                        fontSize: '14px',
+                        color: '#6b7280',
+                        margin: 0,
+                        textDecoration: 'line-through'
+                      }}>
+                        {todo.title}
+                      </p>
+                      <p style={{ fontSize: '12px', color: '#9ca3af', margin: 0 }}>
+                        {todo.description && `${todo.description} · `}
+                        任务 · {getViewTitle(currentView)} · 已完成
+                        {todo.isAIGenerated && ' · AI生成'}
+                      </p>
+                    </div>
+                    <button
+                      onClick={() => toggleStar(todo._id)}
+                      style={{
+                        backgroundColor: 'transparent',
+                        border: 'none',
+                        cursor: 'pointer',
+                        color: todo.isStarred ? theme[500] : '#9ca3af',
+                        padding: '4px'
+                      }}
+                      className="material-icons"
+                      title={todo.isStarred ? '移出重要列表' : '添加到重要列表'}
+                    >
+                      {todo.isStarred ? 'star' : 'star_border'}
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+          </div>
         )}
       </div>
 
@@ -1194,6 +1460,71 @@ const MainContent: React.FC<MainContentProps> = ({ currentView, onTodosUpdate })
                 }}
               >
                 确认
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Task Deletion Confirmation Modal */}
+      {selectedTaskForDeletion && (
+        <div style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          backgroundColor: 'rgba(0, 0, 0, 0.5)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 1000
+        }}>
+          <div style={{
+            backgroundColor: 'white',
+            borderRadius: '12px',
+            padding: '24px',
+            width: '90%',
+            maxWidth: '400px',
+            boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.1)'
+          }}>
+            <div style={{ marginBottom: '20px' }}>
+              <h3 style={{ margin: '0 0 8px 0', fontSize: '18px', fontWeight: '600', color: '#dc2626' }}>
+                确认删除任务
+              </h3>
+              <p style={{ margin: 0, fontSize: '14px', color: '#6b7280' }}>
+                此操作无法撤销。确定要删除这个任务吗？
+              </p>
+            </div>
+
+            <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
+              <button
+                onClick={cancelDeleteTask}
+                style={{
+                  backgroundColor: '#f3f4f6',
+                  color: '#374151',
+                  border: 'none',
+                  padding: '8px 16px',
+                  borderRadius: '6px',
+                  cursor: 'pointer',
+                  fontSize: '14px'
+                }}
+              >
+                取消
+              </button>
+              <button
+                onClick={confirmDeleteTask}
+                style={{
+                  backgroundColor: '#dc2626',
+                  color: 'white',
+                  border: 'none',
+                  padding: '8px 16px',
+                  borderRadius: '6px',
+                  cursor: 'pointer',
+                  fontSize: '14px'
+                }}
+              >
+                删除
               </button>
             </div>
           </div>
