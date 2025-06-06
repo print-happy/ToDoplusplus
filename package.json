@@ -1,0 +1,16 @@
+{
+  "name": "todolist-plus",
+  "version": "1.0.0",
+  "description": "一个现代化的待办事项管理应用，具有AI辅助功能",
+  "scripts": {
+    "start": "concurrently \"npm run start:backend\" \"npm run start:frontend\"",
+    "start:backend": "cd backend && npm start",
+    "start:frontend": "cd frontend && npm start",
+    "build": "cd frontend && npm run build",
+    "dev:backend": "cd backend && npm run dev",
+    "test": "cd frontend && npm test"
+  },
+  "keywords": ["todolist", "ai", "react", "nodejs"],
+  "author": "",
+  "license": "ISC"
+}

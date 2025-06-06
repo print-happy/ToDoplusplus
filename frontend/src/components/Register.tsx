@@ -81,19 +81,19 @@ const Register: React.FC = () => {
   return (
     <div className="relative flex size-full min-h-screen flex-col bg-slate-50 group/design-root overflow-x-hidden" style={{fontFamily: '"Plus Jakarta Sans", "Noto Sans", sans-serif'}}>
       <div className="layout-container flex h-full grow flex-col">
-        <header className="flex items-center justify-between whitespace-nowrap border-b border-solid border-b-[#e7eef3] px-10 py-3">
-          <div className="flex items-center gap-4 text-[#0d151b]">
-            <div className="size-4">
-              <svg viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <header className="flex items-center justify-center whitespace-nowrap border-b border-solid border-b-[#e7eef3] px-10 py-6">
+          <div className="flex flex-col items-center gap-3 text-[#0d151b]">
+            <div className="size-12 flex items-center justify-center">
+              <svg viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg" className="w-full h-full">
                 <path d="M6 6H42L36 24L42 42H6L12 24L6 6Z" fill="currentColor"></path>
               </svg>
             </div>
-            <h2 className="text-[#0d151b] text-lg font-bold leading-tight tracking-[-0.015em]">ToDo++</h2>
+            <h2 className="text-[#0d151b] text-xl font-bold leading-tight tracking-[-0.015em]">ToDo++</h2>
           </div>
         </header>
-        <div className="px-40 flex flex-1 justify-center py-5">
-          <div className="layout-content-container flex flex-col w-[512px] max-w-[512px] py-5 max-w-[960px] flex-1">
-            <h2 className="text-[#0d151b] tracking-light text-[28px] font-bold leading-tight px-4 text-center pb-3 pt-5">Create Account</h2>
+        <div className="flex flex-1 justify-center py-5">
+          <div className="layout-content-container flex flex-col w-[512px] max-w-[512px] py-5 flex-1">
+            <h2 className="text-[#0d151b] tracking-light text-[28px] font-bold leading-tight text-center pb-3 pt-5">创建账户</h2>
 
             {errors.general && (
               <div className="mx-4 mb-4 p-3 bg-red-50 border border-red-200 rounded-xl text-red-600 text-sm">
@@ -104,11 +104,11 @@ const Register: React.FC = () => {
             <form onSubmit={handleSubmit}>
               <div className="flex max-w-[480px] flex-wrap items-end gap-4 px-4 py-3">
                 <label className="flex flex-col min-w-40 flex-1">
-                  <p className="text-[#0d151b] text-base font-medium leading-normal pb-2">Username</p>
+                  <p className="text-[#0d151b] text-base font-medium leading-normal pb-2">用户名</p>
                   <input
                     name="username"
                     type="text"
-                    placeholder="Enter your username"
+                    placeholder="请输入用户名"
                     className={`form-input flex w-full min-w-0 flex-1 resize-none overflow-hidden rounded-xl text-[#0d151b] focus:outline-0 focus:ring-0 border ${errors.username ? 'border-red-300 bg-red-50' : 'border-[#cfdce7] bg-slate-50 focus:border-[#cfdce7]'} h-14 placeholder:text-[#4c759a] p-[15px] text-base font-normal leading-normal`}
                     value={formData.username}
                     onChange={handleInputChange}
@@ -118,11 +118,11 @@ const Register: React.FC = () => {
               </div>
               <div className="flex max-w-[480px] flex-wrap items-end gap-4 px-4 py-3">
                 <label className="flex flex-col min-w-40 flex-1">
-                  <p className="text-[#0d151b] text-base font-medium leading-normal pb-2">Email</p>
+                  <p className="text-[#0d151b] text-base font-medium leading-normal pb-2">邮箱</p>
                   <input
                     name="email"
                     type="email"
-                    placeholder="Enter your email"
+                    placeholder="请输入邮箱地址"
                     className={`form-input flex w-full min-w-0 flex-1 resize-none overflow-hidden rounded-xl text-[#0d151b] focus:outline-0 focus:ring-0 border ${errors.email ? 'border-red-300 bg-red-50' : 'border-[#cfdce7] bg-slate-50 focus:border-[#cfdce7]'} h-14 placeholder:text-[#4c759a] p-[15px] text-base font-normal leading-normal`}
                     value={formData.email}
                     onChange={handleInputChange}
@@ -132,11 +132,11 @@ const Register: React.FC = () => {
               </div>
               <div className="flex max-w-[480px] flex-wrap items-end gap-4 px-4 py-3">
                 <label className="flex flex-col min-w-40 flex-1">
-                  <p className="text-[#0d151b] text-base font-medium leading-normal pb-2">Password</p>
+                  <p className="text-[#0d151b] text-base font-medium leading-normal pb-2">密码</p>
                   <input
                     name="password"
                     type="password"
-                    placeholder="Enter your password"
+                    placeholder="请输入密码"
                     className={`form-input flex w-full min-w-0 flex-1 resize-none overflow-hidden rounded-xl text-[#0d151b] focus:outline-0 focus:ring-0 border ${errors.password ? 'border-red-300 bg-red-50' : 'border-[#cfdce7] bg-slate-50 focus:border-[#cfdce7]'} h-14 placeholder:text-[#4c759a] p-[15px] text-base font-normal leading-normal`}
                     value={formData.password}
                     onChange={handleInputChange}
@@ -146,11 +146,11 @@ const Register: React.FC = () => {
               </div>
               <div className="flex max-w-[480px] flex-wrap items-end gap-4 px-4 py-3">
                 <label className="flex flex-col min-w-40 flex-1">
-                  <p className="text-[#0d151b] text-base font-medium leading-normal pb-2">Confirm Password</p>
+                  <p className="text-[#0d151b] text-base font-medium leading-normal pb-2">确认密码</p>
                   <input
                     name="confirmPassword"
                     type="password"
-                    placeholder="Confirm your password"
+                    placeholder="请再次输入密码"
                     className={`form-input flex w-full min-w-0 flex-1 resize-none overflow-hidden rounded-xl text-[#0d151b] focus:outline-0 focus:ring-0 border ${errors.confirmPassword ? 'border-red-300 bg-red-50' : 'border-[#cfdce7] bg-slate-50 focus:border-[#cfdce7]'} h-14 placeholder:text-[#4c759a] p-[15px] text-base font-normal leading-normal`}
                     value={formData.confirmPassword}
                     onChange={handleInputChange}
@@ -164,12 +164,12 @@ const Register: React.FC = () => {
                   disabled={isLoading}
                   className={`flex min-w-[84px] max-w-[480px] cursor-pointer items-center justify-center overflow-hidden rounded-full h-10 px-4 flex-1 ${isLoading ? 'bg-gray-400' : 'bg-[#1284e7] hover:bg-[#0f6bc7]'} text-slate-50 text-sm font-bold leading-normal tracking-[0.015em] transition-colors`}
                 >
-                  <span className="truncate">{isLoading ? 'Creating Account...' : 'Register'}</span>
+                  <span className="truncate">{isLoading ? '创建账户中...' : '注册'}</span>
                 </button>
               </div>
             </form>
             <p className="text-[#4c759a] text-sm font-normal leading-normal pb-3 pt-1 px-4 text-center">
-              <Link to="/login" className="underline hover:text-[#1284e7]">Already have an account? Login</Link>
+              <Link to="/login" className="underline hover:text-[#1284e7]">已有账户？立即登录</Link>
             </p>
           </div>
         </div>

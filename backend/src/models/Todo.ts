@@ -8,7 +8,7 @@ export interface ITodo extends mongoose.Document {
   status: 'pending' | 'completed';
   priority: 'low' | 'medium' | 'high';
   xmlContent: string;
-  isAIGenerated: boolean;
+  customListId?: mongoose.Types.ObjectId;
 }
 
 const todoSchema = new mongoose.Schema({
@@ -44,9 +44,10 @@ const todoSchema = new mongoose.Schema({
     type: String,
     required: true
   },
-  isAIGenerated: {
-    type: Boolean,
-    default: false
+  customListId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'CustomList',
+    required: false
   }
 }, {
   timestamps: true

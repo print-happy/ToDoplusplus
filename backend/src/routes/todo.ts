@@ -7,11 +7,17 @@ const router = express.Router();
 // 获取所有待办事项
 router.get('/', auth, async (req: any, res) => {
   try {
+    console.log('GET todos request for user:', req.user._id);
     const todos = await Todo.find({ user: req.user._id })
       .sort({ dueDate: 1 });
+    console.log('Found todos:', todos.length);
     res.json(todos);
-  } catch (error) {
-    res.status(500).json({ error: '获取待办事项失败' });
+  } catch (error: any) {
+    console.error('Get todos error:', error);
+    res.status(500).json({
+      error: '获取待办事项失败',
+      message: error.message
+    });
   }
 });
 
@@ -32,16 +38,30 @@ router.post('/', auth, async (req: any, res) => {
 // 更新待办事项
 router.patch('/:id', auth, async (req: any, res) => {
   try {
+    console.log('PATCH request received:', {
+      id: req.params.id,
+      body: req.body,
+      user: req.user._id
+    });
+
     const todo = await Todo.findOne({ _id: req.params.id, user: req.user._id });
     if (!todo) {
+      console.log('Todo not found:', req.params.id);
       return res.status(404).json({ error: '待办事项不存在' });
     }
 
+    console.log('Updating todo:', todo._id, 'with data:', req.body);
     Object.assign(todo, req.body);
     await todo.save();
+
+    console.log('Todo updated successfully:', todo);
     res.json(todo);
-  } catch (error) {
-    res.status(400).json({ error: '更新待办事项失败' });
+  } catch (error: any) {
+    console.error('Update todo error:', error);
+    res.status(400).json({
+      error: '更新待办事项失败',
+      message: error.message
+    });
   }
 });
 
@@ -58,28 +78,6 @@ router.delete('/:id', auth, async (req: any, res) => {
   }
 });
 
-// AI生成待办事项
-router.post('/generate', auth, async (req: any, res) => {
-  try {
-    const { prompt } = req.body;
-    
-    // TODO: 调用ChatGLM API生成待办事项
-    // 这里需要实现与ChatGLM的集成
-    // 临时返回模拟数据
-    const generatedTodo = new Todo({
-      user: req.user._id,
-      title: 'AI生成的待办事项',
-      description: '这是一个示例待办事项',
-      dueDate: new Date(),
-      xmlContent: '<todo><title>AI生成的待办事项</title><description>这是一个示例待办事项</description></todo>',
-      isAIGenerated: true
-    });
-    
-    await generatedTodo.save();
-    res.status(201).json(generatedTodo);
-  } catch (error) {
-    res.status(500).json({ error: '生成待办事项失败' });
-  }
-});
+
 
 export default router; 
