@@ -1,17 +1,25 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { InputNumber, Button, Modal, Typography } from 'antd';
 
 const CountdownPage: React.FC = () => {
   const [hours, setHours] = useState<number>(0);
   const [minutes, setMinutes] = useState<number>(1);
   const [seconds, setSeconds] = useState<number>(0);
-  const [left, setLeft] = useState<number>(60);
+  const [left, setLeft] = useState<number>(60); // 默认1分钟
   const [running, setRunning] = useState(false);
   const [showModal, setShowModal] = useState(false);
   const timerRef = useRef<NodeJS.Timeout | null>(null);
   const audioRef = useRef<HTMLAudioElement>(null);
 
+  // 计算总秒数
   const totalSeconds = hours * 3600 + minutes * 60 + seconds;
+
+  // 当时间设置改变时，更新剩余时间
+  useEffect(() => {
+    if (!running) {
+      setLeft(totalSeconds);
+    }
+  }, [hours, minutes, seconds, running, totalSeconds]);
 
   const start = () => {
     const total = totalSeconds;

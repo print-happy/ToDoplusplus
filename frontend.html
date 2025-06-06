@@ -1,0 +1,248 @@
+<html lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>Todo List</title>
+<link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet"/>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<style>
+        body {
+            font-family: 'Roboto', sans-serif;
+        }
+        .bg-theme-50 {
+            background-color: var(--theme-50);
+        }
+        .bg-theme-100 {
+            background-color: var(--theme-100);
+        }
+        .bg-theme-500 {
+            background-color: var(--theme-500);
+        }
+        .text-theme-200 {
+            color: var(--theme-200);
+        }
+        .text-theme-600 {
+            color: var(--theme-600);
+        }
+        .placeholder-theme-200::placeholder {
+            color: var(--theme-200);
+        }
+        .hover\:bg-theme-50:hover {
+            background-color: var(--theme-50);
+        }
+        .hover\:text-theme-600:hover {
+            color: var(--theme-600);
+        }
+    </style>
+</head>
+<body class="bg-gray-100 flex">
+<aside class="w-64 bg-white p-4 border-r border-gray-200 flex flex-col">
+<div class="flex items-center mb-6">
+<img alt="User avatar" class="w-10 h-10 rounded-full mr-3" src="https://lh3.googleusercontent.com/aida-public/AB6AXuBxbm1JchewrOoKfk-Px1243Q4G4-Qag0e7HHa1z7h449aqcQigSqOPDMUooO8RBSqnFu3BxSJL7MROuzUzZE4AmLMI8fLa8Z6jqzLu3JhHbEcWVbQcNjI4IveTP-tfMpAuMleWjQ9h27VGI2mQFApp3JzBTWIKpr8v6YppgqRHwPMBE0sChwkg_7XrtJQUwjxxUrmndjuFZU6vfYjakHPCvV0Q0bNqBfkXMfRjY40kBiMgmaFc6pI9pcHo5osWULhwoT9TxK-FjTQ"/>
+<div>
+<p class="font-semibold text-sm">username</p>
+<p class="text-xs text-gray-500">test@gmail.com</p>
+</div>
+</div>
+<nav class="flex-grow">
+<ul>
+<li class="mb-2">
+<a class="flex items-center text-sm text-gray-700 hover:bg-blue-50 p-2 rounded-md" href="#">
+<span class="material-icons mr-3 text-gray-500">lightbulb</span> 我的一天
+                    </a>
+</li>
+<li class="mb-2">
+<a class="flex items-center text-sm text-gray-700 hover:bg-blue-50 p-2 rounded-md" href="#">
+<span class="material-icons mr-3 text-gray-500">star_border</span> 重要
+                    </a>
+</li>
+<li class="mb-2">
+<a class="flex items-center text-sm text-theme-600 bg-theme-100 p-2 rounded-md font-medium" href="#" style="--theme-50: #eff6ff; --theme-100: #dbeafe; --theme-200: #bfdbfe; --theme-500: #3b82f6; --theme-600: #2563eb;">
+<span class="material-icons mr-3 text-theme-600">list_alt</span> 已计划
+                    </a>
+</li>
+<li class="mb-2">
+<a class="flex items-center text-sm text-gray-700 hover:bg-green-50 p-2 rounded-md" href="#">
+<span class="material-icons mr-3 text-gray-500">person_outline</span> 已分配给我
+                    </a>
+</li>
+<li class="mb-2">
+<a class="flex items-center text-sm text-gray-700 hover:bg-yellow-50 p-2 rounded-md" href="#">
+<span class="material-icons mr-3 text-gray-500">flag</span> 标记的电子邮件
+                    </a>
+</li>
+<li class="mb-2">
+<a class="flex items-center text-sm text-gray-700 hover:bg-purple-50 p-2 rounded-md" href="#">
+<span class="material-icons mr-3 text-gray-500">task_alt</span> 任务
+                    </a>
+</li>
+</ul>
+</nav>
+<div>
+<button class="w-full flex items-center text-sm text-gray-700 hover:bg-gray-100 p-2 rounded-md">
+<span class="material-icons mr-2">add</span> 新建列表
+            </button>
+</div>
+</aside>
+<main class="flex-1 p-6 grid grid-cols-1 @[800px]:grid-cols-2 gap-6">
+<div class="bg-white rounded-lg shadow p-6 col-span-1 @[800px]:col-span-2" style="--theme-50: #eff6ff; --theme-100: #dbeafe; --theme-200: #bfdbfe; --theme-500: #3b82f6; --theme-600: #2563eb;">
+<div class="flex justify-between items-center mb-4">
+<h1 class="text-2xl font-semibold text-theme-600 flex items-center">
+<span class="material-icons mr-2 text-theme-600">list_alt</span> 已计划
+                </h1>
+<div>
+<button class="text-gray-500 hover:text-gray-700">
+<span class="material-icons">more_horiz</span>
+</button>
+<button class="text-gray-500 hover:text-gray-700">
+<span class="material-icons">unfold_less</span>
+</button>
+</div>
+</div>
+<div class="space-y-3 mb-4">
+<div class="flex items-center p-3 bg-gray-50 rounded-md">
+<span class="material-icons text-gray-400 mr-3">radio_button_unchecked</span>
+<div class="flex-1">
+<p class="text-sm text-gray-700">Finish TODO++</p>
+<p class="text-xs text-gray-500">任务 · 我的一天 · 计划内</p>
+</div>
+<span class="material-icons text-gray-400">star_border</span>
+</div>
+<div class="flex items-center p-3 bg-gray-50 rounded-md">
+<span class="material-icons text-gray-400 mr-3">radio_button_unchecked</span>
+<div class="flex-1">
+<p class="text-sm text-gray-700">阅读源码@vitejs/plugin-react</p>
+<p class="text-xs text-gray-500">任务 · 我的一天 · 计划内</p>
+</div>
+<span class="material-icons text-gray-400">star_border</span>
+</div>
+<div class="flex items-center p-3 bg-gray-50 rounded-md">
+<span class="material-icons text-gray-400 mr-3">radio_button_unchecked</span>
+<div class="flex-1">
+<p class="text-sm text-gray-700">给学弟讲需求分析和设计稿</p>
+<p class="text-xs text-gray-500">任务 · 我的一天 · 计划内</p>
+</div>
+<span class="material-icons text-gray-400">star_border</span>
+</div>
+</div>
+<div class="flex items-center py-2 px-3">
+<span class="material-icons text-theme-500 mr-3">add</span>
+<input class="bg-transparent text-gray-700 placeholder-gray-400 flex-1 focus:outline-none" placeholder="添加任务" type="text"/>
+<div class="flex items-center space-x-2 ml-auto">
+<button class="text-gray-500 hover:text-theme-600" title="AI 生成">
+<span class="material-icons text-sm">auto_awesome</span>
+</button>
+<button class="text-gray-500 hover:text-theme-600"><span class="material-icons text-sm">calendar_today</span></button>
+<button class="text-gray-500 hover:text-theme-600"><span class="material-icons text-sm">notifications_none</span></button>
+<button class="text-gray-500 hover:text-theme-600"><span class="material-icons text-sm">repeat</span></button>
+</div>
+</div>
+</div>
+<div class="bg-white rounded-lg shadow p-6 col-span-1 @[800px]:col-span-2" style="--theme-50: #eff6ff; --theme-100: #dbeafe; --theme-200: #bfdbfe; --theme-500: #3b82f6; --theme-600: #2563eb;">
+<div class="flex justify-between items-center mb-6">
+<div class="flex items-center">
+<button class="text-gray-500 hover:text-gray-700">
+<span class="material-icons">chevron_left</span>
+</button>
+<h2 class="text-lg font-medium text-gray-700 mx-2">2023 June</h2>
+<button class="text-gray-500 hover:text-gray-700">
+<span class="material-icons">chevron_right</span>
+</button>
+</div>
+<button class="text-sm text-theme-600 hover:bg-theme-50 px-3 py-1 rounded-md">Today</button>
+</div>
+<div class="grid grid-cols-7 gap-1 text-center text-xs text-gray-500 mb-2">
+<div>Su</div>
+<div>Mo</div>
+<div>Tu</div>
+<div>We</div>
+<div>Th</div>
+<div>Fr</div>
+<div>Sa</div>
+</div>
+<div class="grid grid-cols-7 gap-1 text-center text-sm">
+<div class="text-gray-400 p-2">31</div>
+<div class="p-2">01</div>
+<div class="p-2">02</div>
+<div class="p-2">03</div>
+<div class="p-2">04</div>
+<div class="p-2">05</div>
+<div class="p-2 bg-theme-100 text-theme-600 rounded-md font-medium">06</div>
+<div class="p-2">07</div>
+<div class="p-2">08</div>
+<div class="p-2">09</div>
+<div class="p-2">10</div>
+<div class="p-2">11</div>
+<div class="p-2">12</div>
+<div class="p-2">13</div>
+<div class="p-2">14</div>
+<div class="p-2">15</div>
+<div class="p-2">16</div>
+<div class="p-2">17</div>
+<div class="p-2">18</div>
+<div class="p-2">19</div>
+<div class="p-2">20</div>
+<div class="p-2">21</div>
+<div class="p-2">22</div>
+<div class="p-2">23</div>
+<div class="p-2">24</div>
+<div class="p-2">25</div>
+<div class="p-2">26</div>
+<div class="p-2">27</div>
+<div class="p-2">28</div>
+<div class="p-2">29</div>
+<div class="p-2">30</div>
+<div class="text-gray-400 p-2">01</div>
+<div class="text-gray-400 p-2">02</div>
+<div class="text-gray-400 p-2">03</div>
+<div class="text-gray-400 p-2">04</div>
+</div>
+</div>
+</main>
+<script>
+        const themeColors = [
+            { name: 'blue', values: { 50: '#eff6ff', 100: '#dbeafe', 200: '#bfdbfe', 500: '#3b82f6', 600: '#2563eb' } },
+            { name: 'green', values: { 50: '#f0fdf4', 100: '#dcfce7', 200: '#bbf7d0', 500: '#22c55e', 600: '#16a34a' } },
+            { name: 'yellow', values: { 50: '#fefce8', 100: '#fef9c3', 200: '#fef08a', 500: '#eab308', 600: '#ca8a04' } },
+            { name: 'purple', values: { 50: '#faf5ff', 100: '#f3e8ff', 200: '#e9d5ff', 500: '#a855f7', 600: '#9333ea' } },
+            { name: 'red', values: { 50: '#fef2f2', 100: '#fee2e2', 200: '#fecaca', 500: '#ef4444', 600: '#dc2626' } },
+            { name: 'indigo', values: { 50: '#eef2ff', 100: '#e0e7ff', 200: '#c7d2fe', 500: '#6366f1', 600: '#4f46e5' } },
+            { name: 'pink', values: { 50: '#fdf2f8', 100: '#fce7f3', 200: '#fbcfe8', 500: '#ec4899', 600: '#db2777' } }
+        ];
+        function applyRandomTheme(element) {
+            const randomTheme = themeColors[Math.floor(Math.random() * themeColors.length)];
+            element.style.setProperty('--theme-50', randomTheme.values[50]);
+            element.style.setProperty('--theme-100', randomTheme.values[100]);
+            element.style.setProperty('--theme-200', randomTheme.values[200]);
+            element.style.setProperty('--theme-500', randomTheme.values[500]);
+            element.style.setProperty('--theme-600', randomTheme.values[600]);
+        }
+        document.addEventListener('DOMContentLoaded', () => {
+            const listItems = document.querySelectorAll('nav ul li a');
+            listItems.forEach(item => {
+                // Apply random theme to hover states if it's not the currently selected one
+                if (!item.classList.contains('bg-theme-100')) {
+                    const randomTheme = themeColors[Math.floor(Math.random() * themeColors.length)];
+                    item.addEventListener('mouseenter', () => {
+                        item.style.setProperty('--hover-bg-color', randomTheme.values[50]);
+                        item.style.setProperty('--hover-text-color', randomTheme.values[600]);
+                        item.classList.add('hover:bg-[var(--hover-bg-color)]', 'hover:text-[var(--hover-text-color)]');
+                    });
+                    item.addEventListener('mouseleave', () => {
+                        item.style.removeProperty('--hover-bg-color');
+                        item.style.removeProperty('--hover-text-color');
+                        item.classList.remove('hover:bg-[var(--hover-bg-color)]', 'hover:text-[var(--hover-text-color)]');
+                    });
+                }
+            });
+            const mainContentSections = document.querySelectorAll('main > div[style*="--theme-"]');
+            mainContentSections.forEach(section => {
+                applyRandomTheme(section);
+            });
+            const activeListItem = document.querySelector('nav ul li a.bg-theme-100');
+            if (activeListItem) {
+                 applyRandomTheme(activeListItem);
+            }
+        });
+    </script>
+
+</body></html>

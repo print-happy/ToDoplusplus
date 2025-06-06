@@ -1,51 +1,77 @@
-.App {
-  text-align: center;
+/* Global styles for the new design */
+.app {
+  font-family: 'Roboto', 'Plus Jakarta Sans', 'Noto Sans', sans-serif;
 }
 
-.App-logo {
-  height: 40vmin;
-  pointer-events: none;
+/* Custom theme variables */
+:root {
+  --theme-50: #eff6ff;
+  --theme-100: #dbeafe;
+  --theme-200: #bfdbfe;
+  --theme-500: #3b82f6;
+  --theme-600: #2563eb;
 }
 
-@media (prefers-reduced-motion: no-preference) {
-  .App-logo {
-    animation: App-logo-spin infinite 20s linear;
-  }
+.bg-theme-50 {
+  background-color: var(--theme-50);
 }
 
-.App-header {
-  background-color: #282c34;
+.bg-theme-100 {
+  background-color: var(--theme-100);
+}
+
+.bg-theme-500 {
+  background-color: var(--theme-500);
+}
+
+.text-theme-200 {
+  color: var(--theme-200);
+}
+
+.text-theme-600 {
+  color: var(--theme-600);
+}
+
+.placeholder-theme-200::placeholder {
+  color: var(--theme-200);
+}
+
+.hover\:bg-theme-50:hover {
+  background-color: var(--theme-50);
+}
+
+.hover\:text-theme-600:hover {
+  color: var(--theme-600);
+}
+
+/* Smooth transitions */
+* {
+  transition: all 0.2s ease-in-out;
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: #f1f1f1;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #c1c1c1;
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #a8a8a8;
+}
+
+/* Reset default styles */
+body, #root, .app {
   min-height: 100vh;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  font-size: calc(10px + 2vmin);
-  color: white;
-}
-
-.App-link {
-  color: #61dafb;
-}
-
-@keyframes App-logo-spin {
-  from {
-    transform: rotate(0deg);
-  }
-  to {
-    transform: rotate(360deg);
-  }
-}
-
-body, #root, .App {
-  min-height: 100vh;
-  background: #fff;
-  background-attachment: unset;
-}
-
-.todo-row > td {
-  padding-top: 16px !important;
-  padding-bottom: 16px !important;
-  background: rgba(255,255,255,0.95);
-  border-bottom: 8px solid transparent;
+  margin: 0;
+  padding: 0;
+  background: #f8fafc;
+  font-family: 'Roboto', 'Plus Jakarta Sans', 'Noto Sans', sans-serif;
 }

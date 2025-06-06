@@ -11,22 +11,24 @@ export interface IUser extends mongoose.Document {
 const userSchema = new mongoose.Schema({
   username: {
     type: String,
-    required: true,
+    required: [true, '用户名是必需的'],
     unique: true,
     trim: true,
-    minlength: 3
+    minlength: [3, '用户名至少需要3个字符'],
+    maxlength: [20, '用户名不能超过20个字符']
   },
   email: {
     type: String,
-    required: true,
+    required: [true, '邮箱是必需的'],
     unique: true,
     trim: true,
-    lowercase: true
+    lowercase: true,
+    match: [/^[^\s@]+@[^\s@]+\.[^\s@]+$/, '请提供有效的邮箱地址']
   },
   password: {
     type: String,
-    required: true,
-    minlength: 6
+    required: [true, '密码是必需的'],
+    minlength: [6, '密码至少需要6个字符']
   }
 }, {
   timestamps: true
@@ -47,7 +49,15 @@ userSchema.pre('save', async function(next) {
 
 // 密码比较方法
 userSchema.methods.comparePassword = async function(candidatePassword: string): Promise<boolean> {
-  return bcrypt.compare(candidatePassword, this.password);
+  try {
+    return await bcrypt.compare(candidatePassword, this.password);
+  } catch (error) {
+    throw new Error('密码比较失败');
+  }
 };
+
+// 创建索引
+userSchema.index({ email: 1 }, { unique: true });
+userSchema.index({ username: 1 }, { unique: true });
 
 export default mongoose.model<IUser>('User', userSchema); 
