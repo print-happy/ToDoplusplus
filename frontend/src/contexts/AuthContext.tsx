@@ -45,11 +45,52 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const login = async (email: string, password: string) => {
     try {
-      // 模拟登录用于演示
+      // 尝试真实的后端登录
+      try {
+        const response = await axios.post('http://localhost:5000/api/auth/login', {
+          email,
+          password,
+        }, { timeout: 5000 });
+        const { user, token } = response.data;
+        setUser(user);
+        setToken(token);
+        localStorage.setItem('token', token);
+        localStorage.setItem('user', JSON.stringify(user));
+        return;
+      } catch (backendError) {
+        console.log('Backend login failed, using mock login:', backendError);
+      }
+
+      // 后端不可用时的模拟登录
       if (email && password) {
+        // 检查本地注册的用户
+        const registeredUsers = JSON.parse(localStorage.getItem('registeredUsers') || '[]');
+        const registeredUser = registeredUsers.find((user: any) =>
+          user.email === email && user.password === password
+        );
+
+        if (registeredUser) {
+          // 使用注册的用户信息
+          const mockUser = {
+            _id: 'mock-user-' + Date.now(),
+            name: registeredUser.username,
+            username: registeredUser.username,
+            email: registeredUser.email,
+          };
+          const mockToken = 'mock-jwt-token-' + Date.now();
+
+          setUser(mockUser);
+          setToken(mockToken);
+          localStorage.setItem('token', mockToken);
+          localStorage.setItem('user', JSON.stringify(mockUser));
+          return;
+        }
+
+        // 如果没有注册用户，允许任何邮箱密码组合（演示模式）
         const mockUser = {
-          _id: 'mock-user-id',
+          _id: 'mock-user-demo',
           name: email.split('@')[0] || 'username',
+          username: email.split('@')[0] || 'username',
           email: email,
         };
         const mockToken = 'mock-jwt-token-' + Date.now();
@@ -61,33 +102,65 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         return;
       }
 
-      // 实际的API调用（当后端可用时）
-      // const response = await axios.post('http://localhost:5000/api/auth/login', {
-      //   email,
-      //   password,
-      // });
-      // const { user, token } = response.data;
-      // setUser(user);
-      // setToken(token);
-      // localStorage.setItem('token', token);
+      throw new Error('登录信息不完整');
     } catch (error) {
-      throw new Error('登录失败');
+      throw error instanceof Error ? error : new Error('登录失败');
     }
   };
 
   const register = async (username: string, email: string, password: string) => {
     try {
-      const response = await axios.post('http://localhost:5000/api/auth/register', {
-        username,
-        email,
-        password,
-      });
-      const { user, token } = response.data;
-      setUser(user);
-      setToken(token);
-      localStorage.setItem('token', token);
+      // 尝试真实的后端注册
+      try {
+        const response = await axios.post('http://localhost:5000/api/auth/register', {
+          username,
+          email,
+          password,
+        }, { timeout: 5000 });
+        const { user, token } = response.data;
+        setUser(user);
+        setToken(token);
+        localStorage.setItem('token', token);
+        localStorage.setItem('user', JSON.stringify(user));
+        return;
+      } catch (backendError) {
+        console.log('Backend registration failed, using mock registration:', backendError);
+      }
+
+      // 后端不可用时的模拟注册
+      if (username && email && password) {
+        // 检查本地存储中是否已有相同用户名或邮箱
+        const existingUsers = JSON.parse(localStorage.getItem('registeredUsers') || '[]');
+        const userExists = existingUsers.some((user: any) =>
+          user.username === username || user.email === email
+        );
+
+        if (userExists) {
+          throw new Error('用户名或邮箱已被使用');
+        }
+
+        const mockUser = {
+          _id: 'mock-user-' + Date.now(),
+          username: username,
+          name: username,
+          email: email,
+        };
+        const mockToken = 'mock-jwt-token-' + Date.now();
+
+        // 保存用户到本地注册列表
+        existingUsers.push({ username, email, password });
+        localStorage.setItem('registeredUsers', JSON.stringify(existingUsers));
+
+        setUser(mockUser);
+        setToken(mockToken);
+        localStorage.setItem('token', mockToken);
+        localStorage.setItem('user', JSON.stringify(mockUser));
+        return;
+      }
+
+      throw new Error('注册信息不完整');
     } catch (error) {
-      throw new Error('注册失败');
+      throw error instanceof Error ? error : new Error('注册失败');
     }
   };
 

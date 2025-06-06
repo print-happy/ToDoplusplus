@@ -18,6 +18,7 @@ interface Todo {
   isAIGenerated?: boolean;
   isStarred?: boolean;
   category?: string; // For custom lists
+  viewCategory?: string; // For category-specific tasks
   createdAt?: string;
   updatedAt?: string;
 }
@@ -42,6 +43,7 @@ const MainContent: React.FC<MainContentProps> = ({ currentView, onTodosUpdate })
   const [showCompletedSection, setShowCompletedSection] = useState(false);
   const [showMoreOptions, setShowMoreOptions] = useState(false);
   const [selectedTaskForDeletion, setSelectedTaskForDeletion] = useState<string | null>(null);
+  const [deleteMode, setDeleteMode] = useState(false);
   const { user, token } = useAuth();
 
   const datePickerRef = useRef<HTMLDivElement>(null);
@@ -75,6 +77,7 @@ const MainContent: React.FC<MainContentProps> = ({ currentView, onTodosUpdate })
             priority: 'high' as const,
             isAIGenerated: false,
             isStarred: true,
+            viewCategory: 'important', // Assign to important view
           },
           {
             _id: '2',
@@ -86,6 +89,7 @@ const MainContent: React.FC<MainContentProps> = ({ currentView, onTodosUpdate })
             priority: 'medium' as const,
             isAIGenerated: true,
             isStarred: false,
+            viewCategory: 'planned', // Assign to planned view
           },
           {
             _id: '3',
@@ -97,6 +101,19 @@ const MainContent: React.FC<MainContentProps> = ({ currentView, onTodosUpdate })
             priority: 'low' as const,
             isAIGenerated: false,
             isStarred: false,
+            viewCategory: 'assigned', // Assign to assigned view
+          },
+          {
+            _id: '4',
+            user: user?._id || '',
+            title: '通用任务示例',
+            description: '这是一个通用任务',
+            dueDate: new Date(Date.now() + 86400000).toISOString(),
+            status: 'pending' as const,
+            priority: 'medium' as const,
+            isAIGenerated: false,
+            isStarred: false,
+            viewCategory: 'tasks', // Assign to tasks view
           },
         ];
         setTodos(mockTodos);
@@ -190,11 +207,11 @@ const MainContent: React.FC<MainContentProps> = ({ currentView, onTodosUpdate })
         600: '#2563eb'
       },
       'important': {
-        50: '#fefce8',
-        100: '#fef9c3',
-        200: '#fef08a',
-        500: '#eab308',
-        600: '#ca8a04'
+        50: '#fef2f2',
+        100: '#fee2e2',
+        200: '#fecaca',
+        500: '#ef4444',
+        600: '#dc2626'
       },
       'planned': {
         50: '#eff6ff',
@@ -225,7 +242,7 @@ const MainContent: React.FC<MainContentProps> = ({ currentView, onTodosUpdate })
         600: '#9333ea'
       }
     };
-    return themes[view as keyof typeof themes] || themes.planned;
+    return themes[view as keyof typeof themes] || themes.tasks;
   };
 
   const toggleTodo = async (id: string) => {
@@ -313,17 +330,57 @@ const MainContent: React.FC<MainContentProps> = ({ currentView, onTodosUpdate })
     // 使用选择的日期或默认为明天
     const taskDueDate = selectedDate || dayjs().add(1, 'day').toISOString();
 
+    // Assign task properties based on current view
+    let taskProperties = {
+      isStarred: false,
+      category: undefined as string | undefined,
+      dueDate: taskDueDate,
+      viewCategory: currentView, // Add explicit view category
+    };
+
+    switch (currentView) {
+      case 'important':
+        taskProperties.isStarred = true;
+        taskProperties.viewCategory = 'important';
+        break;
+      case 'my-day':
+        taskProperties.dueDate = dayjs().toISOString(); // Today
+        taskProperties.viewCategory = 'my-day';
+        break;
+      case 'planned':
+        // Use selected date or tomorrow
+        taskProperties.dueDate = selectedDate || dayjs().add(1, 'day').toISOString();
+        taskProperties.viewCategory = 'planned';
+        break;
+      case 'assigned':
+        // Task assigned to current user (default behavior)
+        taskProperties.viewCategory = 'assigned';
+        break;
+      case 'tasks':
+        taskProperties.viewCategory = 'tasks';
+        break;
+      default:
+        if (currentView.startsWith('custom-')) {
+          taskProperties.category = currentView;
+          taskProperties.viewCategory = currentView;
+        } else {
+          taskProperties.viewCategory = 'tasks'; // Default fallback
+        }
+        break;
+    }
+
     const newTodo = {
       _id: Date.now().toString(), // 临时ID
       user: user?._id || '',
       title: newTaskInput,
       description: reminderTime ? `提醒: ${reminderTime}` : '',
-      dueDate: taskDueDate,
+      dueDate: taskProperties.dueDate,
       priority: 'medium' as const,
       status: 'pending' as const,
       isAIGenerated: false,
-      isStarred: false,
-      category: currentView.startsWith('custom-') ? currentView : undefined,
+      isStarred: taskProperties.isStarred,
+      category: taskProperties.category,
+      viewCategory: taskProperties.viewCategory,
     };
 
     // 立即添加到本地状态以提供即时反馈
@@ -417,14 +474,55 @@ const MainContent: React.FC<MainContentProps> = ({ currentView, onTodosUpdate })
         const data = await response.json();
         const aiResponse = data.choices[0]?.message?.content;
 
+        // Assign task properties based on current view for AI tasks (shared logic)
+        const getAiTaskProperties = () => {
+          const taskDueDate = selectedDate || dayjs().add(1, 'day').toISOString();
+          let aiTaskProperties = {
+            isStarred: false,
+            category: undefined as string | undefined,
+            dueDate: taskDueDate,
+            viewCategory: currentView,
+          };
+
+          switch (currentView) {
+            case 'important':
+              aiTaskProperties.isStarred = true;
+              aiTaskProperties.viewCategory = 'important';
+              break;
+            case 'my-day':
+              aiTaskProperties.dueDate = dayjs().toISOString(); // Today
+              aiTaskProperties.viewCategory = 'my-day';
+              break;
+            case 'planned':
+              aiTaskProperties.dueDate = selectedDate || dayjs().add(1, 'day').toISOString();
+              aiTaskProperties.viewCategory = 'planned';
+              break;
+            case 'assigned':
+              aiTaskProperties.viewCategory = 'assigned';
+              break;
+            case 'tasks':
+              aiTaskProperties.viewCategory = 'tasks';
+              break;
+            default:
+              if (currentView.startsWith('custom-')) {
+                aiTaskProperties.category = currentView;
+                aiTaskProperties.viewCategory = currentView;
+              } else {
+                aiTaskProperties.viewCategory = 'tasks';
+              }
+              break;
+          }
+
+          return aiTaskProperties;
+        };
+
         try {
           // 尝试解析AI返回的JSON
           const parsedResponse = JSON.parse(aiResponse);
           const aiTasks = parsedResponse.tasks || [];
 
           if (aiTasks.length > 0) {
-            // 使用选择的日期或默认为明天
-            const taskDueDate = selectedDate || dayjs().add(1, 'day').toISOString();
+            const aiTaskProperties = getAiTaskProperties();
 
             // 为每个AI生成的任务创建todo对象
             const newTodos = aiTasks.map((task: any, index: number) => ({
@@ -432,12 +530,13 @@ const MainContent: React.FC<MainContentProps> = ({ currentView, onTodosUpdate })
               user: user?._id || '',
               title: task.title || task.name || '未命名任务',
               description: task.description || (reminderTime ? `提醒: ${reminderTime}` : ''),
-              dueDate: taskDueDate,
+              dueDate: aiTaskProperties.dueDate,
               priority: task.priority || 'medium',
               status: 'pending' as const,
               isAIGenerated: true,
-              isStarred: false,
-              category: currentView.startsWith('custom-') ? currentView : undefined,
+              isStarred: aiTaskProperties.isStarred,
+              category: aiTaskProperties.category,
+              viewCategory: aiTaskProperties.viewCategory,
             }));
 
             // 添加到现有任务列表
@@ -455,19 +554,20 @@ const MainContent: React.FC<MainContentProps> = ({ currentView, onTodosUpdate })
             setShowReminderPicker(false);
           } else {
             // 如果AI没有返回结构化数据，创建单个任务
-            const taskDueDate = selectedDate || dayjs().add(1, 'day').toISOString();
+            const aiTaskProperties = getAiTaskProperties();
 
             const newTodo = {
               _id: `ai-${Date.now()}`,
               user: user?._id || '',
               title: aiResponse || newTaskInput,
               description: reminderTime ? `AI生成的任务 · 提醒: ${reminderTime}` : 'AI生成的任务',
-              dueDate: taskDueDate,
+              dueDate: aiTaskProperties.dueDate,
               priority: 'medium' as const,
               status: 'pending' as const,
               isAIGenerated: true,
-              isStarred: false,
-              category: currentView.startsWith('custom-') ? currentView : undefined,
+              isStarred: aiTaskProperties.isStarred,
+              category: aiTaskProperties.category,
+              viewCategory: aiTaskProperties.viewCategory,
             };
 
             const updatedTodos = [...todos, newTodo];
@@ -485,19 +585,20 @@ const MainContent: React.FC<MainContentProps> = ({ currentView, onTodosUpdate })
           }
         } catch (parseError) {
           // 如果解析失败，直接使用AI的回复作为任务标题
-          const taskDueDate = selectedDate || dayjs().add(1, 'day').toISOString();
+          const aiTaskProperties = getAiTaskProperties();
 
           const newTodo = {
             _id: `ai-${Date.now()}`,
             user: user?._id || '',
             title: aiResponse || newTaskInput,
             description: reminderTime ? `AI生成的任务 · 提醒: ${reminderTime}` : 'AI生成的任务',
-            dueDate: taskDueDate,
+            dueDate: aiTaskProperties.dueDate,
             priority: 'medium' as const,
             status: 'pending' as const,
             isAIGenerated: true,
-            isStarred: false,
-            category: currentView.startsWith('custom-') ? currentView : undefined,
+            isStarred: aiTaskProperties.isStarred,
+            category: aiTaskProperties.category,
+            viewCategory: aiTaskProperties.viewCategory,
           };
 
           const updatedTodos = [...todos, newTodo];
@@ -624,30 +725,52 @@ const MainContent: React.FC<MainContentProps> = ({ currentView, onTodosUpdate })
 
     switch (currentView) {
       case 'my-day':
-        // Tasks due today
+        // Tasks specifically created for "my-day" view OR tasks due today
         return todos.filter(todo => {
-          const dueDate = dayjs(todo.dueDate).startOf('day');
-          return dueDate.isSame(today, 'day');
+          if (todo.viewCategory === 'my-day') return true;
+          // Fallback: show tasks due today if no viewCategory is set (for backward compatibility)
+          if (!todo.viewCategory) {
+            const dueDate = dayjs(todo.dueDate).startOf('day');
+            return dueDate.isSame(today, 'day');
+          }
+          return false;
         });
 
       case 'important':
-        // Only starred/important tasks
-        return todos.filter(todo => todo.isStarred);
+        // Only tasks specifically marked for important view OR starred tasks
+        return todos.filter(todo => {
+          if (todo.viewCategory === 'important') return true;
+          // Fallback: show starred tasks if no viewCategory is set (for backward compatibility)
+          if (!todo.viewCategory && todo.isStarred) return true;
+          return false;
+        });
 
       case 'planned':
-        // Tasks with due dates (excluding overdue tasks)
+        // Only tasks specifically created for "planned" view
         return todos.filter(todo => {
-          const dueDate = dayjs(todo.dueDate).startOf('day');
-          return dueDate.isAfter(today) || dueDate.isSame(today, 'day');
+          if (todo.viewCategory === 'planned') return true;
+          // Fallback: show future tasks if no viewCategory is set (for backward compatibility)
+          if (!todo.viewCategory) {
+            const dueDate = dayjs(todo.dueDate).startOf('day');
+            return dueDate.isAfter(today) || dueDate.isSame(today, 'day');
+          }
+          return false;
         });
 
       case 'assigned':
-        // Tasks assigned to current user (all tasks for now since we don't have assignment logic)
-        return todos.filter(todo => todo.user === user?._id);
+        // Only tasks specifically created for "assigned" view
+        return todos.filter(todo => {
+          if (todo.viewCategory === 'assigned') return true;
+          // Fallback: show user's tasks if no viewCategory is set (for backward compatibility)
+          if (!todo.viewCategory && todo.user === user?._id) return true;
+          return false;
+        });
 
       case 'tasks':
-        // All tasks
-        return todos;
+        // Only tasks specifically created for "tasks" view OR tasks without viewCategory
+        return todos.filter(todo => {
+          return todo.viewCategory === 'tasks' || !todo.viewCategory;
+        });
 
       default:
         // Check if it's a custom list
@@ -655,8 +778,8 @@ const MainContent: React.FC<MainContentProps> = ({ currentView, onTodosUpdate })
           // For custom lists, show tasks that have the custom list ID in their category
           return todos.filter(todo => todo.category === currentView);
         }
-        // Default to all tasks
-        return todos;
+        // Default to tasks view
+        return todos.filter(todo => todo.viewCategory === 'tasks' || !todo.viewCategory);
     }
   }, [todos, currentView, user]);
 
@@ -674,6 +797,7 @@ const MainContent: React.FC<MainContentProps> = ({ currentView, onTodosUpdate })
   // Debug function to test all functionality
   const runDebugTest = () => {
     console.log('🧪 Running debug test...');
+    console.log('Current view:', currentView);
     console.log('Current todos:', todos);
     console.log('Filtered todos:', filteredTodos);
     console.log('Pending todos:', pendingTodos);
@@ -682,6 +806,19 @@ const MainContent: React.FC<MainContentProps> = ({ currentView, onTodosUpdate })
     console.log('Reminder time:', reminderTime);
     console.log('New task input:', newTaskInput);
     console.log('localStorage todos:', localStorage.getItem('todos'));
+
+    // Test filtering logic
+    console.log('🔍 Filtering test:');
+    todos.forEach(todo => {
+      console.log(`Task "${todo.title}":`, {
+        isStarred: todo.isStarred,
+        category: todo.category,
+        dueDate: todo.dueDate,
+        status: todo.status,
+        user: todo.user
+      });
+    });
+
     message.info('Debug info logged to console');
   };
 
@@ -695,10 +832,28 @@ const MainContent: React.FC<MainContentProps> = ({ currentView, onTodosUpdate })
       }}
     >
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
-        <h1 style={{ fontSize: '24px', fontWeight: '600', color: theme[600], display: 'flex', alignItems: 'center', margin: 0 }}>
-          <span className="material-icons" style={{ marginRight: '8px', color: theme[600], fontSize: '28px' }}>{getViewIcon(currentView)}</span>
-          {getViewTitle(currentView)}
-        </h1>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+          <h1 style={{ fontSize: '24px', fontWeight: '600', color: theme[600], display: 'flex', alignItems: 'center', margin: 0 }}>
+            <span className="material-icons" style={{ marginRight: '8px', color: theme[600], fontSize: '28px' }}>{getViewIcon(currentView)}</span>
+            {getViewTitle(currentView)}
+          </h1>
+          {deleteMode && (
+            <span style={{
+              backgroundColor: '#fef2f2',
+              color: '#dc2626',
+              padding: '4px 8px',
+              borderRadius: '12px',
+              fontSize: '12px',
+              fontWeight: '500',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '4px'
+            }}>
+              <span className="material-icons" style={{ fontSize: '14px' }}>delete</span>
+              删除模式
+            </span>
+          )}
+        </div>
         <div style={{ position: 'relative' }}>
           <button
             onClick={() => setShowSettings(true)}
@@ -787,31 +942,31 @@ const MainContent: React.FC<MainContentProps> = ({ currentView, onTodosUpdate })
 
               <button
                 onClick={() => {
-                  if (pendingTodos.length > 0) {
-                    handleDeleteTask(pendingTodos[0]._id);
-                  } else {
-                    message.warning('没有可删除的任务');
-                  }
+                  setDeleteMode(!deleteMode);
+                  setShowMoreOptions(false);
+                  message.info(deleteMode ? '已退出删除模式' : '已进入删除模式，点击任务右侧的红色按钮删除任务');
                 }}
                 style={{
                   width: '100%',
                   padding: '8px 12px',
                   border: 'none',
-                  backgroundColor: 'transparent',
+                  backgroundColor: deleteMode ? '#fef2f2' : 'transparent',
                   borderRadius: '4px',
                   cursor: 'pointer',
                   fontSize: '14px',
                   textAlign: 'left',
-                  color: '#dc2626',
+                  color: deleteMode ? '#dc2626' : '#6b7280',
                   display: 'flex',
                   alignItems: 'center',
                   gap: '8px'
                 }}
-                onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#fef2f2'}
-                onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
+                onMouseEnter={(e) => e.currentTarget.style.backgroundColor = deleteMode ? '#fecaca' : '#f3f4f6'}
+                onMouseLeave={(e) => e.currentTarget.style.backgroundColor = deleteMode ? '#fef2f2' : 'transparent'}
               >
-                <span className="material-icons" style={{ fontSize: '16px' }}>delete</span>
-                删除待办
+                <span className="material-icons" style={{ fontSize: '16px' }}>
+                  {deleteMode ? 'delete_forever' : 'delete'}
+                </span>
+                {deleteMode ? '退出删除模式' : '删除任务'}
               </button>
             </div>
           )}
@@ -882,20 +1037,46 @@ const MainContent: React.FC<MainContentProps> = ({ currentView, onTodosUpdate })
                   {todo.isAIGenerated && ' · AI生成'}
                 </p>
               </div>
-              <button
-                onClick={() => toggleStar(todo._id)}
-                style={{
-                  backgroundColor: 'transparent',
-                  border: 'none',
-                  cursor: 'pointer',
-                  color: todo.isStarred ? theme[500] : '#9ca3af',
-                  padding: '4px'
-                }}
-                className="material-icons"
-                title={todo.isStarred ? '移出重要列表' : '添加到重要列表'}
-              >
-                {todo.isStarred ? 'star' : 'star_border'}
-              </button>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                <button
+                  onClick={() => toggleStar(todo._id)}
+                  style={{
+                    backgroundColor: 'transparent',
+                    border: 'none',
+                    cursor: 'pointer',
+                    color: todo.isStarred ? theme[500] : '#9ca3af',
+                    padding: '4px'
+                  }}
+                  className="material-icons"
+                  title={todo.isStarred ? '移出重要列表' : '添加到重要列表'}
+                >
+                  {todo.isStarred ? 'star' : 'star_border'}
+                </button>
+                {deleteMode && (
+                  <button
+                    onClick={() => handleDeleteTask(todo._id)}
+                    style={{
+                      backgroundColor: 'transparent',
+                      border: 'none',
+                      cursor: 'pointer',
+                      color: '#dc2626',
+                      padding: '4px',
+                      borderRadius: '4px',
+                      transition: 'all 0.2s'
+                    }}
+                    className="material-icons"
+                    title="删除任务"
+                    onMouseEnter={(e) => {
+                      e.currentTarget.style.backgroundColor = '#fef2f2';
+                    }}
+                    onMouseLeave={(e) => {
+                      e.currentTarget.style.backgroundColor = 'transparent';
+                    }}
+                  >
+                    delete
+                  </button>
+                )}
+              </div>
             </div>
           ))}
 
@@ -973,20 +1154,46 @@ const MainContent: React.FC<MainContentProps> = ({ currentView, onTodosUpdate })
                         {todo.isAIGenerated && ' · AI生成'}
                       </p>
                     </div>
-                    <button
-                      onClick={() => toggleStar(todo._id)}
-                      style={{
-                        backgroundColor: 'transparent',
-                        border: 'none',
-                        cursor: 'pointer',
-                        color: todo.isStarred ? theme[500] : '#9ca3af',
-                        padding: '4px'
-                      }}
-                      className="material-icons"
-                      title={todo.isStarred ? '移出重要列表' : '添加到重要列表'}
-                    >
-                      {todo.isStarred ? 'star' : 'star_border'}
-                    </button>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                      <button
+                        onClick={() => toggleStar(todo._id)}
+                        style={{
+                          backgroundColor: 'transparent',
+                          border: 'none',
+                          cursor: 'pointer',
+                          color: todo.isStarred ? theme[500] : '#9ca3af',
+                          padding: '4px'
+                        }}
+                        className="material-icons"
+                        title={todo.isStarred ? '移出重要列表' : '添加到重要列表'}
+                      >
+                        {todo.isStarred ? 'star' : 'star_border'}
+                      </button>
+                      {deleteMode && (
+                        <button
+                          onClick={() => handleDeleteTask(todo._id)}
+                          style={{
+                            backgroundColor: 'transparent',
+                            border: 'none',
+                            cursor: 'pointer',
+                            color: '#dc2626',
+                            padding: '4px',
+                            borderRadius: '4px',
+                            transition: 'all 0.2s'
+                          }}
+                          className="material-icons"
+                          title="删除任务"
+                          onMouseEnter={(e) => {
+                            e.currentTarget.style.backgroundColor = '#fef2f2';
+                          }}
+                          onMouseLeave={(e) => {
+                            e.currentTarget.style.backgroundColor = 'transparent';
+                          }}
+                        >
+                          delete
+                        </button>
+                      )}
+                    </div>
                   </div>
                 ))}
               </div>
@@ -998,7 +1205,16 @@ const MainContent: React.FC<MainContentProps> = ({ currentView, onTodosUpdate })
       </div>
 
       {/* Add Task Input */}
-      <div style={{ display: 'flex', flexDirection: 'column', padding: '8px 12px', position: 'relative' }}>
+      <div style={{
+        display: 'flex',
+        flexDirection: 'column',
+        padding: '8px 12px',
+        position: 'relative',
+        zIndex: 1,
+        backgroundColor: theme[50],
+        borderRadius: '8px',
+        border: `1px solid ${theme[200]}`
+      }}>
         {/* Settings indicators */}
         {(selectedDate || reminderTime) && (
           <div style={{ display: 'flex', gap: '8px', marginBottom: '8px', fontSize: '12px', color: '#6b7280' }}>
@@ -1051,7 +1267,7 @@ const MainContent: React.FC<MainContentProps> = ({ currentView, onTodosUpdate })
             onChange={(e) => setNewTaskInput(e.target.value)}
             onKeyPress={(e) => e.key === 'Enter' && addTask()}
           />
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginLeft: 'auto' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginLeft: 'auto', position: 'relative' }}>
           <button
             style={{
               color: aiLoading ? theme[500] : '#6b7280',
@@ -1161,14 +1377,14 @@ const MainContent: React.FC<MainContentProps> = ({ currentView, onTodosUpdate })
       {showDatePicker && (
         <div ref={datePickerRef} style={{
           position: 'absolute',
-          top: '100%',
-          right: '0',
+          top: 'calc(100% + 8px)',
+          right: '80px',
           backgroundColor: 'white',
           border: '1px solid #e5e7eb',
           borderRadius: '8px',
           padding: '12px',
           boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)',
-          zIndex: 1000,
+          zIndex: 1001,
           minWidth: '200px'
         }}>
           <p style={{ margin: '0 0 8px 0', fontSize: '14px', fontWeight: '500' }}>选择截止日期</p>
@@ -1273,14 +1489,14 @@ const MainContent: React.FC<MainContentProps> = ({ currentView, onTodosUpdate })
       {showReminderPicker && (
         <div ref={reminderPickerRef} style={{
           position: 'absolute',
-          top: '100%',
-          right: '0',
+          top: 'calc(100% + 8px)',
+          right: '40px',
           backgroundColor: 'white',
           border: '1px solid #e5e7eb',
           borderRadius: '8px',
           padding: '12px',
           boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)',
-          zIndex: 1000,
+          zIndex: 1001,
           minWidth: '200px'
         }}>
           <p style={{ margin: '0 0 8px 0', fontSize: '14px', fontWeight: '500' }}>设置提醒</p>
