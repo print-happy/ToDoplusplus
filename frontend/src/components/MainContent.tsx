@@ -4,7 +4,7 @@ import axios from 'axios';
 import dayjs from 'dayjs';
 import { useAuth } from '../contexts/AuthContext';
 import Settings from './Settings';
-import { getApiKeyWithPrompt, sanitizeApiKeyForLogging } from '../utils/apiKeyManager';
+import { getApiKeyWithPrompt, sanitizeApiKeyForLogging, getAllUserApiKeys, clearAllApiKeys, testApiKeyIsolation } from '../utils/apiKeyManager';
 
 interface Todo {
   _id: string;
@@ -52,86 +52,117 @@ const MainContent: React.FC<MainContentProps> = ({ currentView, onTodosUpdate })
 
   const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:5000/api';
 
-  const initializeTodos = useCallback(() => {
-    setLoading(true);
+  // 获取用户专属的localStorage键
+  const getUserTodosKey = useCallback(() => {
+    const userId = user?._id || user?.email || 'anonymous';
+    return `todos_${userId}`;
+  }, [user]);
+
+  // 获取用户专属的todos数据
+  const getUserTodos = useCallback(() => {
     try {
-      // 首先尝试从localStorage获取数据
-      const savedTodos = localStorage.getItem('todos');
+      const userTodosKey = getUserTodosKey();
+      const savedTodos = localStorage.getItem(userTodosKey);
+      console.log(`🔍 Loading todos for user ${user?.email || 'anonymous'} with key: ${userTodosKey}`);
       console.log('Raw localStorage data:', savedTodos);
 
       if (savedTodos) {
         const parsedTodos = JSON.parse(savedTodos);
-        setTodos(parsedTodos);
-        console.log('✅ Loaded todos from localStorage:', parsedTodos);
-        console.log('Number of todos loaded:', parsedTodos.length);
+        // 额外验证：确保所有todos都属于当前用户
+        const userFilteredTodos = parsedTodos.filter((todo: Todo) =>
+          todo.user === user?._id || todo.user === user?.email || !todo.user
+        );
+        console.log('✅ Loaded user-specific todos:', userFilteredTodos);
+        return userFilteredTodos;
+      }
+      return [];
+    } catch (error) {
+      console.error('❌ Error loading user todos:', error);
+      return [];
+    }
+  }, [user, getUserTodosKey]);
+
+  // 保存用户专属的todos数据
+  const saveUserTodos = useCallback((todosToSave: Todo[]) => {
+    try {
+      const userTodosKey = getUserTodosKey();
+      // 确保所有todos都标记为当前用户的
+      const userTodos = todosToSave.map(todo => ({
+        ...todo,
+        user: user?._id || user?.email || ''
+      }));
+      localStorage.setItem(userTodosKey, JSON.stringify(userTodos));
+      console.log(`💾 Saved ${userTodos.length} todos for user ${user?.email || 'anonymous'}`);
+    } catch (error) {
+      console.error('❌ Error saving user todos:', error);
+    }
+  }, [user, getUserTodosKey]);
+
+  // 清理旧的共享数据（一次性迁移）
+  const cleanupLegacyData = useCallback(() => {
+    try {
+      const legacyTodos = localStorage.getItem('todos');
+      if (legacyTodos && user) {
+        console.log('🧹 Found legacy shared todos data, migrating to user-specific storage...');
+        const parsedLegacyTodos = JSON.parse(legacyTodos);
+
+        // 将旧数据迁移到当前用户
+        const userTodos = parsedLegacyTodos.map((todo: Todo) => ({
+          ...todo,
+          user: user._id || user.email || ''
+        }));
+
+        saveUserTodos(userTodos);
+
+        // 删除旧的共享数据
+        localStorage.removeItem('todos');
+        console.log('✅ Legacy data migrated and cleaned up');
+      }
+    } catch (error) {
+      console.error('❌ Error during legacy data cleanup:', error);
+    }
+  }, [user, saveUserTodos]);
+
+  const initializeTodos = useCallback(() => {
+    if (!user) {
+      console.log('⏳ No user logged in, skipping todo initialization');
+      setLoading(false);
+      return;
+    }
+
+    setLoading(true);
+    console.log(`🚀 Initializing todos for user: ${user.email || user.username || user._id}`);
+
+    try {
+      // 获取当前用户的todos
+      const userTodos = getUserTodos();
+
+      if (userTodos.length > 0) {
+        setTodos(userTodos);
+        console.log(`✅ Loaded ${userTodos.length} existing todos for user`);
       } else {
-        // 如果没有保存的数据，使用初始模拟数据
-        const mockTodos = [
-          {
-            _id: '1',
-            user: user?._id || '',
-            title: 'Finish TODO++',
-            description: '完成TODO++项目的开发',
-            dueDate: new Date().toISOString(),
-            status: 'pending' as const,
-            priority: 'high' as const,
-            isAIGenerated: false,
-            isStarred: true,
-            viewCategory: 'important', // Assign to important view
-          },
-          {
-            _id: '2',
-            user: user?._id || '',
-            title: '阅读源码@vitejs/plugin-react',
-            description: '学习React插件的实现',
-            dueDate: new Date(Date.now() + 86400000).toISOString(),
-            status: 'pending' as const,
-            priority: 'medium' as const,
-            isAIGenerated: true,
-            isStarred: false,
-            viewCategory: 'planned', // Assign to planned view
-          },
-          {
-            _id: '3',
-            user: user?._id || '',
-            title: '给学弟讲需求分析和设计稿',
-            description: '分享项目经验',
-            dueDate: new Date(Date.now() + 172800000).toISOString(),
-            status: 'completed' as const,
-            priority: 'low' as const,
-            isAIGenerated: false,
-            isStarred: false,
-            viewCategory: 'assigned', // Assign to assigned view
-          },
-          {
-            _id: '4',
-            user: user?._id || '',
-            title: '通用任务示例',
-            description: '这是一个通用任务',
-            dueDate: new Date(Date.now() + 86400000).toISOString(),
-            status: 'pending' as const,
-            priority: 'medium' as const,
-            isAIGenerated: false,
-            isStarred: false,
-            viewCategory: 'tasks', // Assign to tasks view
-          },
-        ];
-        setTodos(mockTodos);
-        localStorage.setItem('todos', JSON.stringify(mockTodos));
-        console.log('🆕 Initialized with mock todos:', mockTodos);
+        // 新用户：创建空的todos列表
+        console.log('🆕 New user detected, starting with empty todo list');
+        setTodos([]);
+        saveUserTodos([]);
       }
     } catch (error) {
       message.error('初始化待办事项失败');
       console.error('❌ Initialize todos error:', error);
+      setTodos([]);
     }
     setLoading(false);
-  }, [user]);
+  }, [user, getUserTodos, saveUserTodos]);
 
   // 尝试从后端同步数据（可选）
   const syncWithBackend = useCallback(async () => {
-    if (!token) return;
+    if (!token || !user) {
+      console.log('⏳ No token or user, skipping backend sync');
+      return;
+    }
 
     try {
+      console.log(`🔄 Syncing todos with backend for user: ${user.email || user.username}`);
       const response = await axios.get(`${API_URL}/todos`, {
         headers: { Authorization: `Bearer ${token}` },
       });
@@ -140,21 +171,30 @@ const MainContent: React.FC<MainContentProps> = ({ currentView, onTodosUpdate })
         const backendTodos = response.data.sort((a: Todo, b: Todo) =>
           new Date(a.dueDate).getTime() - new Date(b.dueDate).getTime()
         );
-        setTodos(backendTodos);
-        localStorage.setItem('todos', JSON.stringify(backendTodos));
-        console.log('Synced with backend:', backendTodos);
+
+        // 验证后端返回的todos都属于当前用户
+        const userBackendTodos = backendTodos.filter((todo: Todo) =>
+          todo.user === user._id || todo.user === user.email
+        );
+
+        setTodos(userBackendTodos);
+        saveUserTodos(userBackendTodos);
+        console.log(`✅ Synced ${userBackendTodos.length} todos from backend for user`);
       }
     } catch (error) {
       console.log('Backend sync failed, using local data:', error);
       // 不显示错误消息，因为本地数据已经可用
     }
-  }, [token, API_URL]);
+  }, [token, user, API_URL, saveUserTodos]);
 
   useEffect(() => {
+    // 首先清理旧的共享数据
+    cleanupLegacyData();
+    // 然后初始化用户专属数据
     initializeTodos();
     // 可选：尝试与后端同步（不阻塞本地功能）
     syncWithBackend();
-  }, [initializeTodos, syncWithBackend]);
+  }, [cleanupLegacyData, initializeTodos, syncWithBackend]);
 
   // Notify parent component when todos change
   useEffect(() => {
@@ -183,6 +223,81 @@ const MainContent: React.FC<MainContentProps> = ({ currentView, onTodosUpdate })
     };
   }, []);
 
+  // 开发者工具：数据隔离测试
+  useEffect(() => {
+    if (process.env.NODE_ENV === 'development') {
+      (window as any).todoDebug = {
+        getCurrentUserTodos: () => {
+          const userTodosKey = getUserTodosKey();
+          const todos = localStorage.getItem(userTodosKey);
+          console.log(`Current user (${user?.email || 'anonymous'}) todos:`, todos ? JSON.parse(todos) : []);
+          return todos ? JSON.parse(todos) : [];
+        },
+        getAllUserTodos: () => {
+          const allKeys = Object.keys(localStorage).filter(key => key.startsWith('todos_'));
+          const allUserTodos = {};
+          allKeys.forEach(key => {
+            const userId = key.replace('todos_', '');
+            const todos = localStorage.getItem(key);
+            (allUserTodos as any)[userId] = todos ? JSON.parse(todos) : [];
+          });
+          console.log('All user todos:', allUserTodos);
+          return allUserTodos;
+        },
+        clearCurrentUserTodos: () => {
+          const userTodosKey = getUserTodosKey();
+          localStorage.removeItem(userTodosKey);
+          setTodos([]);
+          console.log(`Cleared todos for user: ${user?.email || 'anonymous'}`);
+        },
+        testDataIsolation: () => {
+          console.log('🧪 Testing data isolation...');
+          const allUserTodos = (window as any).todoDebug.getAllUserTodos();
+          const currentUserTodos = (window as any).todoDebug.getCurrentUserTodos();
+          const allUserApiKeys = getAllUserApiKeys();
+          console.log('✅ Data isolation test completed. Check console for details.');
+          return { allUserTodos, currentUserTodos, allUserApiKeys };
+        },
+        getAllUserApiKeys: () => {
+          const apiKeys = getAllUserApiKeys();
+          console.log('All user API keys:', apiKeys);
+          return apiKeys;
+        },
+        clearAllApiKeys: () => {
+          clearAllApiKeys();
+          console.log('All API keys cleared');
+        },
+        testApiKeyIsolation: () => {
+          console.log('🔐 Testing API key isolation...');
+          const isolationResult = testApiKeyIsolation();
+          console.log('✅ API key isolation test completed.');
+          return isolationResult;
+        },
+        emergencySecurityCheck: () => {
+          console.log('🚨 Emergency Security Check...');
+          const isolationResult = testApiKeyIsolation();
+          const dataResult = (window as any).todoDebug.testDataIsolation();
+
+          const securityReport = {
+            timestamp: new Date().toISOString(),
+            apiKeySecurity: isolationResult,
+            dataSecurity: dataResult,
+            overallStatus: isolationResult.securityStatus.includes('BREACH') ? '🚨 SECURITY BREACH DETECTED' : '✅ SECURE'
+          };
+
+          console.log('🔒 Emergency Security Report:', securityReport);
+
+          if (securityReport.overallStatus.includes('BREACH')) {
+            console.error('🚨 CRITICAL: Security breach detected! Immediate action required!');
+          }
+
+          return securityReport;
+        }
+      };
+      console.log('🛠️ Debug tools available: window.todoDebug');
+    }
+  }, [user, getUserTodosKey]);
+
 
 
   const getViewIcon = (view: string) => {
@@ -194,6 +309,14 @@ const MainContent: React.FC<MainContentProps> = ({ currentView, onTodosUpdate })
       'flagged': 'flag',
       'tasks': 'task_alt',
     };
+
+    // Handle custom lists
+    if (view.startsWith('custom-')) {
+      const customLists = JSON.parse(localStorage.getItem('customLists') || '[]');
+      const customList = customLists.find((list: any) => list.id === view);
+      return customList ? customList.icon : 'list_alt';
+    }
+
     return icons[view as keyof typeof icons] || 'list_alt';
   };
 
@@ -242,6 +365,24 @@ const MainContent: React.FC<MainContentProps> = ({ currentView, onTodosUpdate })
         600: '#9333ea'
       }
     };
+
+    // Handle custom lists
+    if (view.startsWith('custom-')) {
+      const customLists = JSON.parse(localStorage.getItem('customLists') || '[]');
+      const customList = customLists.find((list: any) => list.id === view);
+      if (customList) {
+        // Map custom list colors to theme colors
+        const colorMap = {
+          blue: themes['my-day'],
+          green: themes['assigned'],
+          yellow: themes['flagged'],
+          purple: themes['tasks'],
+          red: themes['important']
+        };
+        return colorMap[customList.color as keyof typeof colorMap] || themes.tasks;
+      }
+    }
+
     return themes[view as keyof typeof themes] || themes.tasks;
   };
 
@@ -262,9 +403,9 @@ const MainContent: React.FC<MainContentProps> = ({ currentView, onTodosUpdate })
     );
     setTodos(updatedTodos);
 
-    // 保存到localStorage
-    localStorage.setItem('todos', JSON.stringify(updatedTodos));
-    console.log('Saved to localStorage:', updatedTodos);
+    // 保存到用户专属的localStorage
+    saveUserTodos(updatedTodos);
+    console.log('Saved to user-specific localStorage:', updatedTodos);
 
     // 显示成功消息
     message.success(`任务已标记为${newStatus === 'completed' ? '完成' : '待办'}`);
@@ -300,9 +441,9 @@ const MainContent: React.FC<MainContentProps> = ({ currentView, onTodosUpdate })
     );
     setTodos(updatedTodos);
 
-    // 保存到localStorage
-    localStorage.setItem('todos', JSON.stringify(updatedTodos));
-    console.log('Star state saved to localStorage:', updatedTodos);
+    // 保存到用户专属的localStorage
+    saveUserTodos(updatedTodos);
+    console.log('Star state saved to user-specific localStorage:', updatedTodos);
 
     // 显示成功消息
     message.success(`任务已${newStarred ? '添加到' : '移出'}重要列表`);
@@ -394,8 +535,8 @@ const MainContent: React.FC<MainContentProps> = ({ currentView, onTodosUpdate })
     setShowDatePicker(false);
     setShowReminderPicker(false);
 
-    // 保存到localStorage
-    localStorage.setItem('todos', JSON.stringify(updatedTodos));
+    // 保存到用户专属的localStorage
+    saveUserTodos(updatedTodos);
 
     message.success('任务创建成功!');
 
@@ -418,7 +559,7 @@ const MainContent: React.FC<MainContentProps> = ({ currentView, onTodosUpdate })
           t._id === newTodo._id ? { ...newTodo, _id: response.data._id } : t
         );
         setTodos(finalTodos);
-        localStorage.setItem('todos', JSON.stringify(finalTodos));
+        saveUserTodos(finalTodos);
       }
 
       console.log('Task synced to backend successfully');
@@ -458,7 +599,21 @@ const MainContent: React.FC<MainContentProps> = ({ currentView, onTodosUpdate })
           messages: [
             {
               role: 'system',
-              content: '你是一个专业的任务管理助手。根据用户的自然语言描述，生成具体的、可执行的任务列表。每个任务应该简洁明确，包含具体的行动步骤。请以JSON格式返回任务列表，格式为：{"tasks": [{"title": "任务标题", "description": "任务描述", "priority": "high/medium/low"}]}'
+              content: `你是一个智能任务管理助手。根据用户的自然语言描述，生成具体的、可执行的任务列表。
+
+当前时间: ${new Date().toISOString()}
+今天是: ${new Date().toISOString().split('T')[0]}
+
+时间智能分析规则：
+1. 如果用户提到"今天"、"今日"，设置dueDate为今天
+2. 如果用户提到"明天"、"明日"，设置dueDate为明天
+3. 如果用户提到"下周"、"下个星期"，设置dueDate为下周一
+4. 如果用户提到"紧急"、"急"、"马上"、"立即"，设置dueDate为今天，priority为high
+5. 如果用户提到"重要"、"关键"，priority设置为high
+6. 如果用户提到"不急"、"有空时"、"闲时"，priority设置为low
+7. 如果没有明确时间指示，根据任务性质推断合适的日期
+
+请以JSON格式返回任务列表，格式为：{"tasks": [{"title": "任务标题", "description": "任务描述", "priority": "high/medium/low", "dueDate": "YYYY-MM-DD"}]}`
             },
             {
               role: 'user',
@@ -525,24 +680,36 @@ const MainContent: React.FC<MainContentProps> = ({ currentView, onTodosUpdate })
             const aiTaskProperties = getAiTaskProperties();
 
             // 为每个AI生成的任务创建todo对象
-            const newTodos = aiTasks.map((task: any, index: number) => ({
-              _id: `ai-${Date.now()}-${index}`,
-              user: user?._id || '',
-              title: task.title || task.name || '未命名任务',
-              description: task.description || (reminderTime ? `提醒: ${reminderTime}` : ''),
-              dueDate: aiTaskProperties.dueDate,
-              priority: task.priority || 'medium',
-              status: 'pending' as const,
-              isAIGenerated: true,
-              isStarred: aiTaskProperties.isStarred,
-              category: aiTaskProperties.category,
-              viewCategory: aiTaskProperties.viewCategory,
-            }));
+            const newTodos = aiTasks.map((task: any, index: number) => {
+              // Use AI-determined date if available, otherwise use view-based date
+              let taskDueDate = aiTaskProperties.dueDate;
+              if (task.dueDate) {
+                try {
+                  taskDueDate = dayjs(task.dueDate).toISOString();
+                } catch (error) {
+                  console.warn('Invalid AI date format, using default:', task.dueDate);
+                }
+              }
+
+              return {
+                _id: `ai-${Date.now()}-${index}`,
+                user: user?._id || '',
+                title: task.title || task.name || '未命名任务',
+                description: task.description || (reminderTime ? `提醒: ${reminderTime}` : ''),
+                dueDate: taskDueDate,
+                priority: task.priority || 'medium',
+                status: 'pending' as const,
+                isAIGenerated: true,
+                isStarred: aiTaskProperties.isStarred,
+                category: aiTaskProperties.category,
+                viewCategory: aiTaskProperties.viewCategory,
+              };
+            });
 
             // 添加到现有任务列表
             const updatedTodos = [...todos, ...newTodos];
             setTodos(updatedTodos);
-            localStorage.setItem('todos', JSON.stringify(updatedTodos));
+            saveUserTodos(updatedTodos);
 
             message.success(`AI成功生成了${newTodos.length}个任务`);
 
@@ -572,7 +739,7 @@ const MainContent: React.FC<MainContentProps> = ({ currentView, onTodosUpdate })
 
             const updatedTodos = [...todos, newTodo];
             setTodos(updatedTodos);
-            localStorage.setItem('todos', JSON.stringify(updatedTodos));
+            saveUserTodos(updatedTodos);
 
             message.success('AI生成任务成功');
 
@@ -603,7 +770,7 @@ const MainContent: React.FC<MainContentProps> = ({ currentView, onTodosUpdate })
 
           const updatedTodos = [...todos, newTodo];
           setTodos(updatedTodos);
-          localStorage.setItem('todos', JSON.stringify(updatedTodos));
+          saveUserTodos(updatedTodos);
 
           message.success('AI生成任务成功');
 
@@ -686,7 +853,7 @@ const MainContent: React.FC<MainContentProps> = ({ currentView, onTodosUpdate })
 
     const updatedTodos = todos.filter(t => t._id !== selectedTaskForDeletion);
     setTodos(updatedTodos);
-    localStorage.setItem('todos', JSON.stringify(updatedTodos));
+    saveUserTodos(updatedTodos);
 
     message.success('任务已删除');
     setSelectedTaskForDeletion(null);
@@ -1383,9 +1550,10 @@ const MainContent: React.FC<MainContentProps> = ({ currentView, onTodosUpdate })
           border: '1px solid #e5e7eb',
           borderRadius: '8px',
           padding: '12px',
-          boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)',
+          boxShadow: '0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05)',
           zIndex: 1001,
-          minWidth: '200px'
+          minWidth: '200px',
+          maxWidth: '250px'
         }}>
           <p style={{ margin: '0 0 8px 0', fontSize: '14px', fontWeight: '500' }}>选择截止日期</p>
           <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>

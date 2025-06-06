@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { message } from 'antd';
+import { storeApiKey, getApiKey, removeApiKey, testApiKey as testApiKeyUtil, validateApiKeyFormat } from '../utils/apiKeyManager';
 
 interface SettingsProps {
   isOpen: boolean;
@@ -12,90 +13,61 @@ const Settings: React.FC<SettingsProps> = ({ isOpen, onClose }) => {
   const [isValidating, setIsValidating] = useState(false);
 
   useEffect(() => {
-    // Load existing API key from localStorage
-    const savedApiKey = localStorage.getItem('siliconflow_api_key');
-    if (savedApiKey) {
-      try {
-        // Simple decoding (in production, use proper encryption)
-        const decodedKey = atob(savedApiKey);
-        setApiKey(decodedKey);
-      } catch (error) {
-        console.error('Failed to decode API key:', error);
-      }
+    // 🔒 安全加载：使用用户专属的API密钥管理器
+    const savedKey = getApiKey();
+    if (savedKey) {
+      setApiKey(savedKey);
+      console.log('✅ Loaded API key for current user (secure)');
+    } else {
+      console.log('ℹ️ No API key found for current user');
     }
   }, []);
 
-  const validateApiKey = (key: string): boolean => {
-    // SiliconFlow API key format validation
-    const apiKeyPattern = /^sk-[a-zA-Z0-9]{48,}$/;
-    return apiKeyPattern.test(key);
-  };
-
-  const handleSaveApiKey = () => {
+  const handleSaveApiKey = async () => {
     if (!apiKey.trim()) {
       message.error('请输入API密钥');
       return;
     }
 
-    if (!validateApiKey(apiKey)) {
+    if (!validateApiKeyFormat(apiKey)) {
       message.error('API密钥格式不正确。应该以"sk-"开头，后跟至少48个字符');
       return;
     }
 
     setIsValidating(true);
-    
-    // Test the API key by making a simple request
-    testApiKey(apiKey)
-      .then((isValid) => {
-        if (isValid) {
-          // Simple encoding (in production, use proper encryption)
-          const encodedKey = btoa(apiKey);
-          localStorage.setItem('siliconflow_api_key', encodedKey);
+
+    try {
+      // 🔒 安全验证：使用安全的API密钥测试工具
+      const isValid = await testApiKeyUtil(apiKey);
+
+      if (isValid) {
+        // 🔒 安全存储：使用用户专属的API密钥管理器
+        const success = storeApiKey(apiKey);
+
+        if (success) {
           message.success('API密钥已保存并验证成功');
+          console.log('🔒 API key securely stored for current user');
           onClose();
         } else {
-          message.error('API密钥验证失败，请检查密钥是否正确');
+          message.error('API密钥保存失败');
         }
-      })
-      .catch(() => {
-        message.error('API密钥验证失败，请检查网络连接和密钥');
-      })
-      .finally(() => {
-        setIsValidating(false);
-      });
-  };
-
-  const testApiKey = async (key: string): Promise<boolean> => {
-    try {
-      const response = await fetch('https://api.siliconflow.cn/v1/chat/completions', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${key}`,
-        },
-        body: JSON.stringify({
-          model: 'deepseek-ai/DeepSeek-R1-0528-Qwen3-8B',
-          messages: [
-            {
-              role: 'user',
-              content: 'test'
-            }
-          ],
-          max_tokens: 1
-        }),
-      });
-
-      return response.status === 200 || response.status === 400; // 400 might be due to minimal request
+      } else {
+        message.error('API密钥验证失败，请检查密钥是否正确');
+      }
     } catch (error) {
-      console.error('API key test failed:', error);
-      return false;
+      console.error('API key validation error:', error);
+      message.error('API密钥验证失败，请检查网络连接和密钥');
+    } finally {
+      setIsValidating(false);
     }
   };
 
   const handleRemoveApiKey = () => {
-    localStorage.removeItem('siliconflow_api_key');
+    // 🔒 安全删除：使用用户专属的API密钥管理器
+    removeApiKey();
     setApiKey('');
     message.success('API密钥已删除');
+    console.log('🔒 API key securely removed for current user');
   };
 
   if (!isOpen) return null;
@@ -166,12 +138,14 @@ const Settings: React.FC<SettingsProps> = ({ isOpen, onClose }) => {
               onChange={(e) => setApiKey(e.target.value)}
               placeholder="输入您的SiliconFlow API密钥 (sk-...)"
               style={{
-                width: '100%',
+                width: 'calc(100% - 8px)',
+                maxWidth: '100%',
                 padding: '12px 40px 12px 12px',
                 border: '1px solid #d1d5db',
                 borderRadius: '8px',
                 fontSize: '14px',
-                fontFamily: 'monospace'
+                fontFamily: 'monospace',
+                boxSizing: 'border-box'
               }}
             />
             <button

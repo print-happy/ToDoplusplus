@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { useNavigate } from 'react-router-dom';
 import { message } from 'antd';
+import UserProfile from './UserProfile';
 
 interface SidebarProps {
   onViewChange: (view: string) => void;
@@ -22,12 +23,21 @@ interface CustomList {
 
 const Sidebar: React.FC<SidebarProps> = ({ onViewChange, currentView, userInfo }) => {
   const [isNewListModalOpen, setIsNewListModalOpen] = useState(false);
+  const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
   const [customLists, setCustomLists] = useState<CustomList[]>([]);
   const [newListName, setNewListName] = useState('');
   const [selectedIcon, setSelectedIcon] = useState('list');
   const [selectedColor, setSelectedColor] = useState('blue');
-  const { logout } = useAuth();
+  const { logout, user } = useAuth();
   const navigate = useNavigate();
+
+  // Debug user state changes
+  useEffect(() => {
+    console.log('🔄 Sidebar: User state changed:', user);
+    console.log('👤 Sidebar: User avatar:', user?.avatar);
+    console.log('📝 Sidebar: User name:', user?.name || user?.username);
+    console.log('📧 Sidebar: User email:', user?.email);
+  }, [user]);
 
   const menuItems = [
     { id: 'my-day', name: '我的一天', icon: 'lightbulb', color: 'blue' },
@@ -46,6 +56,73 @@ const Sidebar: React.FC<SidebarProps> = ({ onViewChange, currentView, userInfo }
       red: { bg: '#fee2e2', text: '#dc2626', hover: '#fef2f2' },
     };
     return themes[color as keyof typeof themes] || themes.blue;
+  };
+
+  // Get main content theme colors to match the selected view
+  const getMainContentThemeColors = (view: string) => {
+    const themes = {
+      'my-day': {
+        50: '#eff6ff',
+        100: '#dbeafe',
+        200: '#bfdbfe',
+        500: '#3b82f6',
+        600: '#2563eb'
+      },
+      'important': {
+        50: '#fef2f2',
+        100: '#fee2e2',
+        200: '#fecaca',
+        500: '#ef4444',
+        600: '#dc2626'
+      },
+      'planned': {
+        50: '#eff6ff',
+        100: '#dbeafe',
+        200: '#bfdbfe',
+        500: '#3b82f6',
+        600: '#2563eb'
+      },
+      'assigned': {
+        50: '#f0fdf4',
+        100: '#dcfce7',
+        200: '#bbf7d0',
+        500: '#22c55e',
+        600: '#16a34a'
+      },
+      'flagged': {
+        50: '#fefce8',
+        100: '#fef9c3',
+        200: '#fef08a',
+        500: '#eab308',
+        600: '#ca8a04'
+      },
+      'tasks': {
+        50: '#faf5ff',
+        100: '#f3e8ff',
+        200: '#e9d5ff',
+        500: '#a855f7',
+        600: '#9333ea'
+      }
+    };
+
+    // Handle custom lists
+    if (view.startsWith('custom-')) {
+      const customLists = JSON.parse(localStorage.getItem('customLists') || '[]');
+      const customList = customLists.find((list: any) => list.id === view);
+      if (customList) {
+        // Map custom list colors to theme colors
+        const colorMap = {
+          blue: themes['my-day'],
+          green: themes['assigned'],
+          yellow: themes['flagged'],
+          purple: themes['tasks'],
+          red: themes['important']
+        };
+        return colorMap[customList.color as keyof typeof colorMap] || themes.tasks;
+      }
+    }
+
+    return themes[view as keyof typeof themes] || themes.tasks;
   };
 
   const handleMenuClick = (itemId: string) => {
@@ -106,17 +183,55 @@ const Sidebar: React.FC<SidebarProps> = ({ onViewChange, currentView, userInfo }
   return (
     <aside style={{ width: '256px', backgroundColor: 'white', padding: '16px', borderRight: '1px solid #e5e7eb', display: 'flex', flexDirection: 'column' }}>
       {/* User Info */}
-      <div style={{ display: 'flex', alignItems: 'center', marginBottom: '24px' }}>
-        <img
-          alt="User avatar"
-          style={{ width: '40px', height: '40px', borderRadius: '50%', marginRight: '12px' }}
-          src={userInfo?.avatar || "https://lh3.googleusercontent.com/aida-public/AB6AXuBxbm1JchewrOoKfk-Px1243Q4G4-Qag0e7HHa1z7h449aqcQigSqOPDMUooO8RBSqnFu3BxSJL7MROuzUzZE4AmLMI8fLa8Z6jqzLu3JhHbEcWVbQcNjI4IveTP-tfMpAuMleWjQ9h27VGI2mQFApp3JzBTWIKpr8v6YppgqRHwPMBE0sChwkg_7XrtJQUwjxxUrmndjuFZU6vfYjakHPCvV0Q0bNqBfkXMfRjY40kBiMgmaFc6pI9pcHo5osWULhwoT9TxK-FjTQ"}
-        />
-        <div>
-          <p style={{ fontWeight: '600', fontSize: '14px' }}>{userInfo?.name || 'username'}</p>
-          <p style={{ fontSize: '12px', color: '#6b7280' }}>{userInfo?.email || 'test@gmail.com'}</p>
+      <button
+        onClick={() => setIsProfileModalOpen(true)}
+        style={{
+          width: '100%',
+          display: 'flex',
+          alignItems: 'center',
+          marginBottom: '24px',
+          padding: '8px',
+          backgroundColor: 'transparent',
+          border: 'none',
+          borderRadius: '8px',
+          cursor: 'pointer',
+          transition: 'all 0.2s'
+        }}
+        onMouseEnter={(e) => {
+          e.currentTarget.style.backgroundColor = '#f9fafb';
+        }}
+        onMouseLeave={(e) => {
+          e.currentTarget.style.backgroundColor = 'transparent';
+        }}
+      >
+        <div style={{
+          width: '40px',
+          height: '40px',
+          borderRadius: '50%',
+          marginRight: '12px',
+          backgroundColor: '#e5e7eb',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          fontSize: '18px',
+          backgroundImage: user?.avatar?.startsWith('data:') ? `url(${user.avatar})` : 'none',
+          backgroundSize: 'cover',
+          backgroundPosition: 'center'
+        }}>
+          {!user?.avatar?.startsWith('data:') && (user?.avatar || '👤')}
         </div>
-      </div>
+        <div style={{ flex: 1, textAlign: 'left' }}>
+          <p style={{ fontWeight: '600', fontSize: '14px', margin: 0 }}>
+            {user?.name || user?.username || 'username'}
+          </p>
+          <p style={{ fontSize: '12px', color: '#6b7280', margin: 0 }}>
+            {user?.email || 'test@gmail.com'}
+          </p>
+        </div>
+        <span className="material-icons" style={{ fontSize: '16px', color: '#9ca3af' }}>
+          edit
+        </span>
+      </button>
 
       {/* Navigation Menu */}
       <nav style={{ flexGrow: 1 }}>
@@ -124,7 +239,8 @@ const Sidebar: React.FC<SidebarProps> = ({ onViewChange, currentView, userInfo }
           {/* Default Menu Items */}
           {menuItems.map((item) => {
             const isActive = currentView === item.id;
-            const theme = getThemeColors(item.color);
+            const mainTheme = getMainContentThemeColors(item.id);
+            // const theme = getThemeColors(item.color); // Not used currently
 
             return (
               <li key={item.id} style={{ marginBottom: '8px' }}>
@@ -139,19 +255,21 @@ const Sidebar: React.FC<SidebarProps> = ({ onViewChange, currentView, userInfo }
                     borderRadius: '6px',
                     border: 'none',
                     cursor: 'pointer',
-                    backgroundColor: isActive ? theme.bg : 'transparent',
-                    color: isActive ? theme.text : '#374151',
+                    backgroundColor: isActive ? mainTheme[100] : 'transparent',
+                    color: isActive ? mainTheme[600] : '#374151',
                     fontWeight: isActive ? '500' : 'normal',
                     transition: 'all 0.2s'
                   }}
                   onMouseEnter={(e) => {
                     if (!isActive) {
-                      e.currentTarget.style.backgroundColor = '#f9fafb';
+                      e.currentTarget.style.backgroundColor = mainTheme[50];
+                      e.currentTarget.style.color = mainTheme[600];
                     }
                   }}
                   onMouseLeave={(e) => {
                     if (!isActive) {
                       e.currentTarget.style.backgroundColor = 'transparent';
+                      e.currentTarget.style.color = '#374151';
                     }
                   }}
                 >
@@ -159,7 +277,7 @@ const Sidebar: React.FC<SidebarProps> = ({ onViewChange, currentView, userInfo }
                     className="material-icons"
                     style={{
                       marginRight: '12px',
-                      color: isActive ? theme.text : '#6b7280',
+                      color: isActive ? mainTheme[600] : '#6b7280',
                       fontSize: '20px'
                     }}
                   >
@@ -179,7 +297,8 @@ const Sidebar: React.FC<SidebarProps> = ({ onViewChange, currentView, userInfo }
               </li>
               {customLists.map((list) => {
                 const isActive = currentView === list.id;
-                const theme = getThemeColors(list.color);
+                const mainTheme = getMainContentThemeColors(list.id);
+                // const theme = getThemeColors(list.color); // Not used currently
 
                 return (
                   <li key={list.id} style={{ marginBottom: '8px' }}>
@@ -195,19 +314,21 @@ const Sidebar: React.FC<SidebarProps> = ({ onViewChange, currentView, userInfo }
                           borderRadius: '6px',
                           border: 'none',
                           cursor: 'pointer',
-                          backgroundColor: isActive ? theme.bg : 'transparent',
-                          color: isActive ? theme.text : '#374151',
+                          backgroundColor: isActive ? mainTheme[100] : 'transparent',
+                          color: isActive ? mainTheme[600] : '#374151',
                           fontWeight: isActive ? '500' : 'normal',
                           transition: 'all 0.2s'
                         }}
                         onMouseEnter={(e) => {
                           if (!isActive) {
-                            e.currentTarget.style.backgroundColor = '#f9fafb';
+                            e.currentTarget.style.backgroundColor = mainTheme[50];
+                            e.currentTarget.style.color = mainTheme[600];
                           }
                         }}
                         onMouseLeave={(e) => {
                           if (!isActive) {
                             e.currentTarget.style.backgroundColor = 'transparent';
+                            e.currentTarget.style.color = '#374151';
                           }
                         }}
                       >
@@ -215,7 +336,7 @@ const Sidebar: React.FC<SidebarProps> = ({ onViewChange, currentView, userInfo }
                           className="material-icons"
                           style={{
                             marginRight: '12px',
-                            color: isActive ? theme.text : '#6b7280',
+                            color: isActive ? mainTheme[600] : '#6b7280',
                             fontSize: '20px'
                           }}
                         >
@@ -385,7 +506,15 @@ const Sidebar: React.FC<SidebarProps> = ({ onViewChange, currentView, userInfo }
               </label>
               <div style={{ display: 'flex', gap: '8px' }}>
                 {['blue', 'green', 'yellow', 'purple', 'red'].map((color) => {
-                  const theme = getThemeColors(color);
+                  // Get the actual theme colors that will be used
+                  const colorMap = {
+                    blue: { bg: '#dbeafe', text: '#2563eb' },
+                    green: { bg: '#dcfce7', text: '#16a34a' },
+                    yellow: { bg: '#fef9c3', text: '#ca8a04' },
+                    purple: { bg: '#f3e8ff', text: '#9333ea' },
+                    red: { bg: '#fee2e2', text: '#dc2626' }
+                  };
+                  const theme = colorMap[color as keyof typeof colorMap];
                   return (
                     <button
                       key={color}
@@ -448,6 +577,12 @@ const Sidebar: React.FC<SidebarProps> = ({ onViewChange, currentView, userInfo }
           </div>
         </div>
       )}
+
+      {/* User Profile Modal */}
+      <UserProfile
+        isOpen={isProfileModalOpen}
+        onClose={() => setIsProfileModalOpen(false)}
+      />
     </aside>
   );
 };
