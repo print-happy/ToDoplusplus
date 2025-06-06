@@ -3,6 +3,8 @@ import { message } from 'antd';
 import axios from 'axios';
 import dayjs from 'dayjs';
 import { useAuth } from '../contexts/AuthContext';
+import Settings from './Settings';
+import { getApiKeyWithPrompt, sanitizeApiKeyForLogging } from '../utils/apiKeyManager';
 
 interface Todo {
   _id: string;
@@ -21,9 +23,10 @@ interface Todo {
 
 interface MainContentProps {
   currentView: string;
+  onTodosUpdate?: (todos: Todo[]) => void;
 }
 
-const MainContent: React.FC<MainContentProps> = ({ currentView }) => {
+const MainContent: React.FC<MainContentProps> = ({ currentView, onTodosUpdate }) => {
   const [todos, setTodos] = useState<Todo[]>([]);
   const [loading, setLoading] = useState(true);
   const [newTaskInput, setNewTaskInput] = useState('');
@@ -32,6 +35,9 @@ const MainContent: React.FC<MainContentProps> = ({ currentView }) => {
   const [showDatePicker, setShowDatePicker] = useState(false);
   const [reminderTime, setReminderTime] = useState<string>('');
   const [showReminderPicker, setShowReminderPicker] = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
+  const [showCustomDatePicker, setShowCustomDatePicker] = useState(false);
+  const [customDate, setCustomDate] = useState('');
   const { user, token } = useAuth();
 
   const datePickerRef = useRef<HTMLDivElement>(null);
@@ -127,6 +133,13 @@ const MainContent: React.FC<MainContentProps> = ({ currentView }) => {
     // 可选：尝试与后端同步（不阻塞本地功能）
     syncWithBackend();
   }, [initializeTodos, syncWithBackend]);
+
+  // Notify parent component when todos change
+  useEffect(() => {
+    if (onTodosUpdate) {
+      onTodosUpdate(todos);
+    }
+  }, [todos, onTodosUpdate]);
 
   // Click outside to close dropdowns
   useEffect(() => {
@@ -365,14 +378,24 @@ const MainContent: React.FC<MainContentProps> = ({ currentView }) => {
       return;
     }
 
+    // Get API key securely
+    const apiKey = getApiKeyWithPrompt();
+    if (!apiKey) {
+      message.error('请先在设置中配置您的SiliconFlow API密钥');
+      setShowSettings(true);
+      return;
+    }
+
+    console.log('🤖 Using API key:', sanitizeApiKeyForLogging(apiKey));
+
     setAiLoading(true);
     try {
-      // 直接调用硅基流动API
+      // 调用硅基流动API
       const response = await fetch('https://api.siliconflow.cn/v1/chat/completions', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': 'Bearer sk-xuuvwffyuzajucdzjzvqyyqydgedsjivrmdhydcsjjwiditr',
+          'Authorization': `Bearer ${apiKey}`,
         },
         body: JSON.stringify({
           model: 'deepseek-ai/DeepSeek-R1-0528-Qwen3-8B',
@@ -504,7 +527,33 @@ const MainContent: React.FC<MainContentProps> = ({ currentView }) => {
   const handleDateSelect = (date: string) => {
     setSelectedDate(date);
     setShowDatePicker(false);
+    setShowCustomDatePicker(false);
     message.success(`已设置截止日期：${dayjs(date).format('YYYY-MM-DD')}`);
+  };
+
+  // 自定义日期选择
+  const handleCustomDateSelect = () => {
+    if (!customDate) {
+      message.warning('请选择日期');
+      return;
+    }
+
+    const selectedDateObj = dayjs(customDate);
+    const today = dayjs().startOf('day');
+
+    if (selectedDateObj.isBefore(today)) {
+      message.error('不能选择过去的日期');
+      return;
+    }
+
+    handleDateSelect(selectedDateObj.toISOString());
+    setCustomDate('');
+  };
+
+  // 显示自定义日期选择器
+  const showCustomDateSelector = () => {
+    setShowCustomDatePicker(true);
+    setShowDatePicker(false);
   };
 
   // 提醒功能
@@ -552,6 +601,30 @@ const MainContent: React.FC<MainContentProps> = ({ currentView }) => {
           {getViewTitle(currentView)}
         </h1>
         <div>
+          <button
+            onClick={() => setShowSettings(true)}
+            style={{
+              color: '#6b7280',
+              backgroundColor: 'transparent',
+              border: 'none',
+              cursor: 'pointer',
+              marginRight: '8px',
+              padding: '4px',
+              borderRadius: '4px',
+              transition: 'all 0.2s'
+            }}
+            title="设置"
+            onMouseEnter={(e) => {
+              e.currentTarget.style.backgroundColor = '#f3f4f6';
+              e.currentTarget.style.color = '#374151';
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.backgroundColor = 'transparent';
+              e.currentTarget.style.color = '#6b7280';
+            }}
+          >
+            <span className="material-icons">settings</span>
+          </button>
           <button
             onClick={runDebugTest}
             style={{
@@ -902,6 +975,30 @@ const MainContent: React.FC<MainContentProps> = ({ currentView }) => {
             >
               下个月 ({dayjs().add(1, 'month').format('MM/DD')})
             </button>
+
+            <hr style={{ margin: '8px 0', border: 'none', borderTop: '1px solid #e5e7eb' }} />
+
+            <button
+              onClick={showCustomDateSelector}
+              style={{
+                padding: '8px 12px',
+                border: 'none',
+                backgroundColor: '#f9fafb',
+                borderRadius: '4px',
+                cursor: 'pointer',
+                fontSize: '14px',
+                textAlign: 'left',
+                transition: 'background-color 0.2s',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '8px'
+              }}
+              onMouseEnter={(e) => e.currentTarget.style.backgroundColor = theme[100]}
+              onMouseLeave={(e) => e.currentTarget.style.backgroundColor = '#f9fafb'}
+            >
+              <span className="material-icons" style={{ fontSize: '16px' }}>date_range</span>
+              自定义日期
+            </button>
           </div>
         </div>
       )}
@@ -1010,6 +1107,104 @@ const MainContent: React.FC<MainContentProps> = ({ currentView }) => {
           </div>
         </div>
       )}
+
+      {/* Custom Date Picker Modal */}
+      {showCustomDatePicker && (
+        <div style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          backgroundColor: 'rgba(0, 0, 0, 0.5)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 1000
+        }}>
+          <div style={{
+            backgroundColor: 'white',
+            borderRadius: '12px',
+            padding: '24px',
+            width: '90%',
+            maxWidth: '400px',
+            boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.1)'
+          }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
+              <h3 style={{ margin: 0, fontSize: '18px', fontWeight: '600' }}>选择自定义日期</h3>
+              <button
+                onClick={() => setShowCustomDatePicker(false)}
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  fontSize: '24px',
+                  cursor: 'pointer',
+                  color: '#6b7280'
+                }}
+              >
+                ×
+              </button>
+            </div>
+
+            <div style={{ marginBottom: '20px' }}>
+              <label style={{ display: 'block', marginBottom: '8px', fontSize: '14px', fontWeight: '500' }}>
+                选择日期：
+              </label>
+              <input
+                type="date"
+                value={customDate}
+                onChange={(e) => setCustomDate(e.target.value)}
+                min={dayjs().format('YYYY-MM-DD')}
+                style={{
+                  width: '100%',
+                  padding: '12px',
+                  border: '1px solid #d1d5db',
+                  borderRadius: '8px',
+                  fontSize: '14px'
+                }}
+              />
+            </div>
+
+            <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
+              <button
+                onClick={() => setShowCustomDatePicker(false)}
+                style={{
+                  backgroundColor: '#f3f4f6',
+                  color: '#374151',
+                  border: 'none',
+                  padding: '8px 16px',
+                  borderRadius: '6px',
+                  cursor: 'pointer',
+                  fontSize: '14px'
+                }}
+              >
+                取消
+              </button>
+              <button
+                onClick={handleCustomDateSelect}
+                disabled={!customDate}
+                style={{
+                  backgroundColor: customDate ? theme[500] : '#d1d5db',
+                  color: 'white',
+                  border: 'none',
+                  padding: '8px 16px',
+                  borderRadius: '6px',
+                  cursor: customDate ? 'pointer' : 'not-allowed',
+                  fontSize: '14px'
+                }}
+              >
+                确认
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Settings Modal */}
+      <Settings
+        isOpen={showSettings}
+        onClose={() => setShowSettings(false)}
+      />
     </div>
   );
 };

@@ -3,14 +3,20 @@ import { ChatDeepSeek } from "@langchain/deepseek";
 async function testDeepSeek() {
   try {
     console.log('开始测试 DeepSeek API...');
-    
+
+    // Get API key from environment variable
+    const apiKey = process.env.SILICONFLOW_API_KEY;
+    if (!apiKey) {
+      throw new Error('SILICONFLOW_API_KEY environment variable is required');
+    }
+
     const testInput = "我明天下午3点要开会讨论项目A";
     console.log('测试输入:', testInput);
 
     const response = await fetch('https://api.siliconflow.cn/v1/chat/completions', {
       method: 'POST',
       headers: {
-        'Authorization': 'Bearer sk-xuuvwffyuzajucdzjzvqyyqydgedsjivrmdhydcsjjwiditr',
+        'Authorization': `Bearer ${apiKey}`,
         'Content-Type': 'application/json'
       },
       body: JSON.stringify({

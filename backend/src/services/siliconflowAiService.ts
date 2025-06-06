@@ -79,10 +79,15 @@ export async function generateTodoFromSiliconFlow(naturalLanguageInput: string):
   
   try {
     // 初始化 DeepSeek 模型
+    const apiKey = process.env.SILICONFLOW_API_KEY;
+    if (!apiKey) {
+      throw new Error('SILICONFLOW_API_KEY environment variable is required');
+    }
+
     const llm = new ChatDeepSeek({
       model: "deepseek-ai/DeepSeek-R1-Distill-Qwen-7B",
       temperature: 0.7,
-      apiKey: 'sk-xuuvwffyuzajucdzjzvqyyqydgedsjivrmdhydcsjjwiditr'
+      apiKey: apiKey
     });
 
     // 准备提示

@@ -1,7 +1,7 @@
 const options = {
   method: 'POST',
   headers: {
-    Authorization: 'Bearer sk-xuuvwffyuzajucdzjzvqyyqydgedsjivrmdhydcsjjwiditr',
+    Authorization: 'Bearer YOUR_SILICONFLOW_API_KEY_HERE',
     'Content-Type': 'application/json'
   },
   body: '{"model":"deepseek-ai/DeepSeek-R1-Distill-Qwen-7B","stream":false,"max_tokens":512,"enable_thinking":true,"thinking_budget":4096,"min_p":0.05,"temperature":0.7,"top_p":0.7,"top_k":50,"frequency_penalty":0.5,"n":1,"stop":[],"messages":[{"role":"user","content":"我明天要完成操作系统作业，后天要完成人工智能作业"},{"role"}:"system","content":"现在时间2025年5月18日23:00"]}'
