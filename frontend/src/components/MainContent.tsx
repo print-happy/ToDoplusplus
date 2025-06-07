@@ -6,6 +6,7 @@ import { useAuth } from '../contexts/AuthContext';
 import Settings from './Settings';
 import { getApiKeyWithPrompt, sanitizeApiKeyForLogging, getAllUserApiKeys, clearAllApiKeys, testApiKeyIsolation, getApiKeyAccessLogs, clearApiKeyAccessLogs } from '../utils/apiKeyManager';
 import { emergencyCompleteCleanup, secureUserSwitchCleanup, performSecurityCheck, autoFixDataIsolation } from '../utils/emergencyCleanup';
+import { getAiApiKey, getApiKeyStatus, getSecureApiKeyInfo, hasPersonalApiKey, testApiKeyConnection } from '../utils/aiApiKeyManager';
 
 interface Todo {
   _id: string;
@@ -723,6 +724,76 @@ const MainContent: React.FC<MainContentProps> = ({ currentView, onTodosUpdate })
           validateUserDataIsolation();
 
           return { repairedUsers: repairCount };
+        },
+        // 🔑 双重API密钥机制调试工具
+        testDualApiKeyMechanism: () => {
+          console.log('🔑 Testing dual API key mechanism...');
+
+          const personalKeyStatus = hasPersonalApiKey();
+          const apiKeyResult = getAiApiKey();
+          const keyStatus = getApiKeyStatus();
+          const secureInfo = getSecureApiKeyInfo();
+
+          const dualKeyTest = {
+            timestamp: new Date().toISOString(),
+            personalKeyConfigured: personalKeyStatus,
+            apiKeyResult: apiKeyResult ? {
+              keyType: apiKeyResult.keyType,
+              keySource: apiKeyResult.keySource,
+              isValid: apiKeyResult.isValid,
+            } : null,
+            keyStatus: keyStatus,
+            secureInfo: secureInfo,
+            mechanism: {
+              priority: 'personal > platform',
+              fallback: 'platform key when personal not available',
+              security: 'actual keys never exposed in logs',
+            },
+          };
+
+          console.log('🔑 Dual API Key Test Results:', dualKeyTest);
+          return dualKeyTest;
+        },
+        testApiKeyConnection: async (keyType: 'auto' | 'personal' | 'platform' = 'auto') => {
+          console.log(`🔑 Testing API key connection (${keyType})...`);
+          const result = await testApiKeyConnection(keyType);
+          console.log('🔑 Connection Test Results:', result);
+          return result;
+        },
+        getApiKeyStatus: () => {
+          const status = getApiKeyStatus();
+          console.log('🔑 Current API Key Status:', status);
+          return status;
+        },
+        simulateApiKeyScenarios: () => {
+          console.log('🔑 Simulating different API key scenarios...');
+
+          const scenarios = [
+            {
+              name: 'User with personal key',
+              hasPersonal: hasPersonalApiKey(),
+              expectedKeyType: hasPersonalApiKey() ? 'personal' : 'platform',
+            },
+            {
+              name: 'User without personal key',
+              hasPersonal: false,
+              expectedKeyType: 'platform',
+            },
+          ];
+
+          scenarios.forEach(scenario => {
+            console.log(`📋 Scenario: ${scenario.name}`);
+            console.log(`  - Has personal key: ${scenario.hasPersonal}`);
+            console.log(`  - Expected key type: ${scenario.expectedKeyType}`);
+          });
+
+          const currentResult = getAiApiKey();
+          console.log('🔑 Current actual result:', currentResult ? {
+            keyType: currentResult.keyType,
+            keySource: currentResult.keySource,
+          } : 'No key available');
+
+          return scenarios;
         }
       };
       console.log('🛠️ Debug tools available: window.todoDebug');
@@ -1006,24 +1077,36 @@ const MainContent: React.FC<MainContentProps> = ({ currentView, onTodosUpdate })
       return;
     }
 
-    // Get API key securely
-    const apiKey = getApiKeyWithPrompt();
-    if (!apiKey) {
-      message.error('请先在设置中配置您的SiliconFlow API密钥');
+    // 🔑 使用双重API密钥机制
+    console.log('🔑 Starting AI generation with dual API key mechanism...');
+    const apiKeyResult = getAiApiKey();
+
+    if (!apiKeyResult) {
+      message.error('AI功能暂时不可用，请配置个人API密钥或联系管理员');
       setShowSettings(true);
       return;
     }
 
-    console.log('🤖 Using API key:', sanitizeApiKeyForLogging(apiKey));
+    // 🔑 显示用户友好的API密钥状态信息
+    const keyStatus = getApiKeyStatus();
+    console.log('🔑 API Key Status:', keyStatus.userMessage);
+
+    // 🔑 安全日志记录（不暴露实际密钥）
+    console.log('🤖 AI Generation Details:', {
+      keyType: apiKeyResult.keyType,
+      keySource: apiKeyResult.keySource,
+      userMessage: keyStatus.userMessage,
+      securityNote: 'Actual API key values are never logged'
+    });
 
     setAiLoading(true);
     try {
-      // 调用硅基流动API
+      // 🔑 使用双重机制获取的API密钥调用硅基流动API
       const response = await fetch('https://api.siliconflow.cn/v1/chat/completions', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${apiKey}`,
+          'Authorization': `Bearer ${apiKeyResult.apiKey}`,
         },
         body: JSON.stringify({
           model: 'deepseek-ai/DeepSeek-R1-0528-Qwen3-8B',
@@ -1142,7 +1225,11 @@ const MainContent: React.FC<MainContentProps> = ({ currentView, onTodosUpdate })
             setTodos(updatedTodos);
             saveUserTodos(updatedTodos);
 
-            message.success(`AI成功生成了${newTodos.length}个任务`);
+            // 🔑 根据API密钥类型显示不同的成功消息
+            const successMessage = apiKeyResult.keyType === 'personal'
+              ? `AI成功生成了${newTodos.length}个任务（使用个人密钥）`
+              : `AI成功生成了${newTodos.length}个任务（使用平台密钥）`;
+            message.success(successMessage);
 
             // 清除输入和设置
             setNewTaskInput('');
@@ -1172,7 +1259,11 @@ const MainContent: React.FC<MainContentProps> = ({ currentView, onTodosUpdate })
             setTodos(updatedTodos);
             saveUserTodos(updatedTodos);
 
-            message.success('AI生成任务成功');
+            // 🔑 根据API密钥类型显示不同的成功消息
+            const successMessage = apiKeyResult.keyType === 'personal'
+              ? 'AI生成任务成功（使用个人密钥）'
+              : 'AI生成任务成功（使用平台密钥）';
+            message.success(successMessage);
 
             // 清除输入和设置
             setNewTaskInput('');
@@ -1203,7 +1294,11 @@ const MainContent: React.FC<MainContentProps> = ({ currentView, onTodosUpdate })
           setTodos(updatedTodos);
           saveUserTodos(updatedTodos);
 
-          message.success('AI生成任务成功');
+          // 🔑 根据API密钥类型显示不同的成功消息
+          const successMessage = apiKeyResult.keyType === 'personal'
+            ? 'AI生成任务成功（使用个人密钥）'
+            : 'AI生成任务成功（使用平台密钥）';
+          message.success(successMessage);
 
           // 清除输入和设置
           setNewTaskInput('');
