@@ -284,9 +284,9 @@ docker-compose up --build
 欢迎贡献代码！请遵循以下步骤：
 
 1. Fork 项目
-2. 创建功能分支 (`git checkout -b feature/AmazingFeature`)
+2. 创建功能分支 (`git checkout -b dev/xxx`)
 3. 提交更改 (`git commit -m 'Add some AmazingFeature'`)
-4. 推送到分支 (`git push origin feature/AmazingFeature`)
+4. 推送到分支 (`git push origin dev/xxx`)
 5. 打开 Pull Request
 
 ## 📄 许可证
@@ -297,8 +297,8 @@ docker-compose up --build
 
 如有问题或建议，请通过以下方式联系：
 
-- GitHub Issues: [项目Issues页面]
-- Email: [your-email@example.com]
+- GitHub Issues: [[项目Issues页面](https://github.com/print-happy/ToDoplusplus/issues)]
+- Email: print_happy@outlook.com
 
 ---
 
