@@ -35,6 +35,7 @@ const MainContent: React.FC<MainContentProps> = ({ currentView, onTodosUpdate })
   const [loading, setLoading] = useState(true);
   const [newTaskInput, setNewTaskInput] = useState('');
   const [aiLoading, setAiLoading] = useState(false);
+  const [showAiGeneratingToast, setShowAiGeneratingToast] = useState(false);
   const [selectedDate, setSelectedDate] = useState<string>('');
   const [showDatePicker, setShowDatePicker] = useState(false);
   const [reminderTime, setReminderTime] = useState<string>('');
@@ -891,6 +892,181 @@ const MainContent: React.FC<MainContentProps> = ({ currentView, onTodosUpdate })
               modelSource: currentApiResult?.modelSource,
             },
           };
+        },
+        // 🚨 紧急数据隔离安全检查
+        emergencyDataIsolationCheck: () => {
+          console.log('🚨 EMERGENCY: Starting comprehensive data isolation security check');
+
+          const currentUserId = user?._id || user?.email;
+          if (!currentUserId) {
+            console.warn('⚠️ No current user for security check');
+            return { status: 'NO_USER', issues: ['No current user logged in'] };
+          }
+
+          const issues: string[] = [];
+          const warnings: string[] = [];
+
+          // 1. 检查是否存在全局todos数据
+          const globalTodos = localStorage.getItem('todos');
+          if (globalTodos) {
+            issues.push('🚨 CRITICAL: Global todos data found - immediate security risk');
+            console.error('🚨 CRITICAL SECURITY ISSUE: Global todos data detected');
+          }
+
+          // 2. 检查当前用户的数据完整性
+          const currentUserKey = `todos_${currentUserId}`;
+          const currentUserTodos = localStorage.getItem(currentUserKey);
+          console.log(`🔍 Current user (${currentUserId}) todos key: ${currentUserKey}`);
+
+          // 3. 检查所有用户数据键
+          const allTodoKeys = Object.keys(localStorage).filter(key => key.startsWith('todos_'));
+          console.log(`🔍 Found ${allTodoKeys.length} user todo keys:`, allTodoKeys);
+
+          // 4. 检查跨用户数据污染
+          allTodoKeys.forEach(key => {
+            if (key !== currentUserKey) {
+              try {
+                const otherUserTodos = JSON.parse(localStorage.getItem(key) || '[]');
+                const contaminatedTodos = otherUserTodos.filter((todo: any) =>
+                  todo.user === currentUserId
+                );
+
+                if (contaminatedTodos.length > 0) {
+                  issues.push(`🚨 CRITICAL: Found ${contaminatedTodos.length} contaminated todos in ${key}`);
+                  console.error(`🚨 CRITICAL: Data contamination in ${key}:`, contaminatedTodos);
+                }
+              } catch (error) {
+                warnings.push(`⚠️ Error checking ${key}: ${error}`);
+              }
+            }
+          });
+
+          // 5. 检查当前显示的todos是否都属于当前用户
+          const displayedTodos = todos;
+          const wrongOwnershipTodos = displayedTodos.filter(todo =>
+            todo.user && todo.user !== currentUserId
+          );
+
+          if (wrongOwnershipTodos.length > 0) {
+            issues.push(`🚨 CRITICAL: ${wrongOwnershipTodos.length} displayed todos don't belong to current user`);
+            console.error('🚨 CRITICAL: Wrong ownership todos displayed:', wrongOwnershipTodos);
+          }
+
+          // 6. 检查注册用户数据完整性
+          const registeredUsers = JSON.parse(localStorage.getItem('registeredUsers') || '[]');
+          const currentUserRecord = registeredUsers.find((u: any) =>
+            u.id === currentUserId || u.email === user?.email
+          );
+
+          if (!currentUserRecord) {
+            warnings.push('⚠️ Current user not found in registered users list');
+          }
+
+          const securityReport = {
+            timestamp: new Date().toISOString(),
+            currentUser: currentUserId,
+            status: issues.length > 0 ? '🚨 SECURITY BREACH DETECTED' : '✅ SECURE',
+            criticalIssues: issues,
+            warnings: warnings,
+            dataKeys: {
+              currentUserKey,
+              allTodoKeys,
+              hasGlobalTodos: !!globalTodos,
+            },
+            displayedTodos: {
+              total: displayedTodos.length,
+              wrongOwnership: wrongOwnershipTodos.length,
+            },
+            registeredUsers: {
+              total: registeredUsers.length,
+              currentUserFound: !!currentUserRecord,
+            },
+          };
+
+          console.log('🚨 EMERGENCY DATA ISOLATION SECURITY REPORT:', securityReport);
+
+          if (issues.length > 0) {
+            console.error('🚨 IMMEDIATE ACTION REQUIRED: Critical security issues detected!');
+            console.error('Issues:', issues);
+          }
+
+          return securityReport;
+        },
+        // 🔧 自动修复数据隔离问题
+        autoFixDataIsolationIssues: () => {
+          console.log('🔧 AUTO-FIX: Starting automatic data isolation repair');
+
+          const currentUserId = user?._id || user?.email;
+          if (!currentUserId) {
+            console.warn('⚠️ Cannot auto-fix: No current user');
+            return { success: false, message: 'No current user' };
+          }
+
+          let fixedIssues = 0;
+          const fixLog: string[] = [];
+
+          // 1. 移除全局todos数据
+          const globalTodos = localStorage.getItem('todos');
+          if (globalTodos) {
+            localStorage.removeItem('todos');
+            fixedIssues++;
+            fixLog.push('✅ Removed global todos data');
+            console.log('🔧 Fixed: Removed global todos data');
+          }
+
+          // 2. 清理跨用户数据污染
+          const allTodoKeys = Object.keys(localStorage).filter(key => key.startsWith('todos_'));
+          const currentUserKey = `todos_${currentUserId}`;
+
+          allTodoKeys.forEach(key => {
+            if (key !== currentUserKey) {
+              try {
+                const otherUserTodos = JSON.parse(localStorage.getItem(key) || '[]');
+                const cleanTodos = otherUserTodos.filter((todo: any) =>
+                  todo.user !== currentUserId
+                );
+
+                if (cleanTodos.length !== otherUserTodos.length) {
+                  localStorage.setItem(key, JSON.stringify(cleanTodos));
+                  fixedIssues++;
+                  fixLog.push(`✅ Cleaned contaminated data from ${key}`);
+                  console.log(`🔧 Fixed: Cleaned contaminated data from ${key}`);
+                }
+              } catch (error) {
+                console.error(`Error fixing ${key}:`, error);
+              }
+            }
+          });
+
+          // 3. 确保当前显示的todos都属于当前用户
+          const displayedTodos = todos;
+          const correctTodos = displayedTodos.filter(todo =>
+            !todo.user || todo.user === currentUserId
+          ).map(todo => ({
+            ...todo,
+            user: currentUserId,
+          }));
+
+          if (correctTodos.length !== displayedTodos.length) {
+            setTodos(correctTodos);
+            saveUserTodos(correctTodos);
+            fixedIssues++;
+            fixLog.push('✅ Fixed displayed todos ownership');
+            console.log('🔧 Fixed: Corrected displayed todos ownership');
+          }
+
+          // 4. 重新验证数据隔离
+          validateUserDataIsolation();
+
+          const result = {
+            success: true,
+            fixedIssues,
+            fixLog,
+            message: `Auto-fix completed: ${fixedIssues} issues resolved`,
+          };
+
+          console.log('🔧 AUTO-FIX COMPLETED:', result);
+          return result;
         }
       };
       console.log('🛠️ Debug tools available: window.todoDebug');
@@ -1197,6 +1373,7 @@ const MainContent: React.FC<MainContentProps> = ({ currentView, onTodosUpdate })
     });
 
     setAiLoading(true);
+    setShowAiGeneratingToast(true); // 🤖 显示AI生成提示框
     try {
       // 🔑 使用双重机制获取的API密钥调用硅基流动API
       const response = await fetch('https://api.siliconflow.cn/v1/chat/completions', {
@@ -1413,6 +1590,7 @@ const MainContent: React.FC<MainContentProps> = ({ currentView, onTodosUpdate })
       message.error('AI生成请求失败，请检查网络连接');
     } finally {
       setAiLoading(false);
+      setShowAiGeneratingToast(false); // 🤖 隐藏AI生成提示框
     }
   };
 
@@ -1595,7 +1773,7 @@ const MainContent: React.FC<MainContentProps> = ({ currentView, onTodosUpdate })
     console.log('Selected date:', selectedDate);
     console.log('Reminder time:', reminderTime);
     console.log('New task input:', newTaskInput);
-    console.log('localStorage todos:', localStorage.getItem('todos'));
+    console.log('localStorage user todos:', localStorage.getItem(getUserTodosKey()));
 
     // Test filtering logic
     console.log('🔍 Filtering test:');
@@ -2089,7 +2267,10 @@ const MainContent: React.FC<MainContentProps> = ({ currentView, onTodosUpdate })
             </span>
           </button>
           <button
-            onClick={() => setShowDatePicker(!showDatePicker)}
+            onClick={() => {
+              console.log('🗓️ Date picker button clicked, current state:', showDatePicker);
+              setShowDatePicker(!showDatePicker);
+            }}
             style={{
               color: selectedDate ? theme[500] : '#6b7280',
               backgroundColor: selectedDate ? theme[100] : 'transparent',
@@ -2112,7 +2293,10 @@ const MainContent: React.FC<MainContentProps> = ({ currentView, onTodosUpdate })
             <span className="material-icons" style={{ fontSize: '18px' }}>calendar_today</span>
           </button>
           <button
-            onClick={() => setShowReminderPicker(!showReminderPicker)}
+            onClick={() => {
+              console.log('⏰ Reminder picker button clicked, current state:', showReminderPicker);
+              setShowReminderPicker(!showReminderPicker);
+            }}
             style={{
               color: reminderTime ? theme[500] : '#6b7280',
               backgroundColor: reminderTime ? theme[100] : 'transparent',
@@ -2166,15 +2350,15 @@ const MainContent: React.FC<MainContentProps> = ({ currentView, onTodosUpdate })
       {/* 日期选择器 */}
       {showDatePicker && (
         <div ref={datePickerRef} style={{
-          position: 'absolute',
-          top: 'calc(100% + 8px)',
-          right: '80px',
+          position: 'fixed', // 🔧 改为fixed定位确保显示
+          top: '120px', // 🔧 固定位置
+          right: '20px', // 🔧 固定位置
           backgroundColor: 'white',
           border: '1px solid #e5e7eb',
           borderRadius: '8px',
           padding: '12px',
           boxShadow: '0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05)',
-          zIndex: 1001,
+          zIndex: 1003, // 🔧 提高z-index
           minWidth: '200px',
           maxWidth: '250px'
         }}>
@@ -2279,15 +2463,15 @@ const MainContent: React.FC<MainContentProps> = ({ currentView, onTodosUpdate })
       {/* 提醒选择器 */}
       {showReminderPicker && (
         <div ref={reminderPickerRef} style={{
-          position: 'absolute',
-          top: 'calc(100% + 8px)',
-          right: '40px',
+          position: 'fixed', // 🔧 改为fixed定位确保显示
+          top: '120px', // 🔧 固定位置
+          right: '240px', // 🔧 固定位置，避免与日期选择器重叠
           backgroundColor: 'white',
           border: '1px solid #e5e7eb',
           borderRadius: '8px',
           padding: '12px',
           boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)',
-          zIndex: 1001,
+          zIndex: 1003, // 🔧 提高z-index
           minWidth: '200px'
         }}>
           <p style={{ margin: '0 0 8px 0', fontSize: '14px', fontWeight: '500' }}>设置提醒</p>
@@ -2543,6 +2727,60 @@ const MainContent: React.FC<MainContentProps> = ({ currentView, onTodosUpdate })
         isOpen={showSettings}
         onClose={() => setShowSettings(false)}
       />
+
+      {/* AI生成中提示框 */}
+      {showAiGeneratingToast && (
+        <div style={{
+          position: 'fixed',
+          top: '20px',
+          right: '20px',
+          backgroundColor: '#10b981', // 绿色背景
+          color: 'white',
+          padding: '12px 16px',
+          borderRadius: '8px',
+          boxShadow: '0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05)',
+          zIndex: 1002,
+          display: 'flex',
+          alignItems: 'center',
+          gap: '8px',
+          fontSize: '14px',
+          fontWeight: '500',
+          animation: 'slideInFromRight 0.3s ease-out'
+        }}>
+          <div style={{
+            width: '16px',
+            height: '16px',
+            border: '2px solid rgba(255, 255, 255, 0.3)',
+            borderTop: '2px solid white',
+            borderRadius: '50%',
+            animation: 'spin 1s linear infinite'
+          }}></div>
+          AI生成中...
+        </div>
+      )}
+
+      {/* 添加CSS动画样式 */}
+      <style>{`
+        @keyframes slideInFromRight {
+          from {
+            transform: translateX(100%);
+            opacity: 0;
+          }
+          to {
+            transform: translateX(0);
+            opacity: 1;
+          }
+        }
+
+        @keyframes spin {
+          from {
+            transform: rotate(0deg);
+          }
+          to {
+            transform: rotate(360deg);
+          }
+        }
+      `}</style>
     </div>
   );
 };

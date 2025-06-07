@@ -112,7 +112,7 @@ const Login: React.FC = () => {
               padding: '20px 16px 12px',
               textAlign: 'center',
               margin: 0
-            }}>Welcome back</h2>
+            }}>欢迎回来</h2>
             <form onSubmit={handleSubmit}>
               <div style={{
                 display: 'flex',
@@ -130,9 +130,9 @@ const Login: React.FC = () => {
                     lineHeight: '1.5',
                     paddingBottom: '8px',
                     margin: 0
-                  }}>Username</p>
+                  }}>邮箱/用户名</p>
                   <input
-                    placeholder="Enter your username"
+                    placeholder="请输入邮箱或用户名"
                     style={{
                       display: 'flex',
                       width: '100%',
@@ -173,10 +173,10 @@ const Login: React.FC = () => {
                     lineHeight: '1.5',
                     paddingBottom: '8px',
                     margin: 0
-                  }}>Password</p>
+                  }}>密码</p>
                   <input
                     type="password"
-                    placeholder="Enter your password"
+                    placeholder="请输入密码"
                     style={{
                       display: 'flex',
                       width: '100%',
@@ -228,7 +228,7 @@ const Login: React.FC = () => {
                   }}
                 >
                   <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                    {loading ? '登录中...' : 'Login'}
+                    {loading ? '登录中...' : '登录'}
                   </span>
                 </button>
               </div>
@@ -254,24 +254,10 @@ const Login: React.FC = () => {
                 onMouseEnter={(e) => e.currentTarget.style.color = '#1284e7'}
                 onMouseLeave={(e) => e.currentTarget.style.color = '#4c759a'}
               >
-                Don't have an account? Register
+                还没有账户？立即注册
               </Link>
             </p>
-            <p style={{
-              color: '#4c759a',
-              fontSize: '14px',
-              fontWeight: 'normal',
-              lineHeight: '1.5',
-              paddingBottom: '12px',
-              paddingTop: '4px',
-              padding: '4px 16px 12px',
-              textAlign: 'center',
-              textDecoration: 'underline',
-              margin: 0,
-              cursor: 'pointer'
-            }}>
-              Forgot password?
-            </p>
+
           </div>
         </div>
       </div>
