@@ -49,8 +49,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const login = async (email: string, password: string) => {
     try {
-      // 🚨 紧急安全修复：登录前完全清理之前用户的数据
-      console.log('🚨 SECURITY: Starting complete data cleanup for user login');
+      // 🔧 安全用户登录：只清理会话数据，保留所有用户数据
+      console.log('🔧 SECURITY: Starting safe user login cleanup');
 
       // 1. 清除会话级API密钥缓存
       clearSessionApiKeyCache();
@@ -60,11 +60,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       setToken(null);
       delete axios.defaults.headers.common['Authorization'];
 
-      // 3. 清除可能残留的用户数据
+      // 3. 只清除会话相关数据，保留所有用户的持久化数据
       localStorage.removeItem('user');
       localStorage.removeItem('token');
 
-      console.log('🔒 Data cleanup completed for user login');
+      console.log('🔒 Safe login cleanup completed - all user data preserved');
 
       // 尝试真实的后端登录
       try {
@@ -152,19 +152,16 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const register = async (username: string, email: string, password: string) => {
     try {
-      // 🚨 紧急安全修复：注册前完全清理所有数据
-      console.log('🚨 SECURITY: Starting complete data cleanup for new user registration');
+      // 🔧 安全用户注册：只清理会话数据，保留其他用户的数据
+      console.log('🔧 SECURITY: Starting safe user registration cleanup');
 
       // 1. 清除会话级API密钥缓存
       clearSessionApiKeyCache();
 
-      // 2. 清除所有localStorage数据（防止数据残留）
-      const keysToPreserve = ['theme', 'language']; // 保留非敏感设置
-      const allKeys = Object.keys(localStorage);
-      allKeys.forEach(key => {
-        if (!keysToPreserve.includes(key)) {
-          localStorage.removeItem(key);
-        }
+      // 2. 🔧 只清理当前会话相关数据，保留其他用户数据
+      const sessionKeysToRemove = ['user', 'token']; // 只清理会话相关数据
+      sessionKeysToRemove.forEach(key => {
+        localStorage.removeItem(key);
       });
 
       // 3. 清除sessionStorage
@@ -175,7 +172,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       setToken(null);
       delete axios.defaults.headers.common['Authorization'];
 
-      console.log('🔒 Complete data cleanup completed for new user registration');
+      console.log('🔒 Safe registration cleanup completed - other users data preserved');
 
       // 尝试真实的后端注册
       try {

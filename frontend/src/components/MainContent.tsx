@@ -99,10 +99,16 @@ const MainContent: React.FC<MainContentProps> = ({ currentView, onTodosUpdate })
     }
   }, [user, getUserTodosKey]);
 
-  // 🚨 紧急安全修复：强制数据清理和隔离
-  const forceDataCleanup = useCallback(() => {
+  // 🔧 用户数据隔离验证和清理
+  const validateUserDataIsolation = useCallback(() => {
     try {
-      console.log('🚨 SECURITY: Starting force data cleanup');
+      console.log('🔧 SECURITY: Starting user data isolation validation');
+
+      const currentUserId = user?._id || user?.email;
+      if (!currentUserId) {
+        console.log('⏳ No current user, skipping validation');
+        return;
+      }
 
       // 1. 清理旧的共享数据
       const legacyTodos = localStorage.getItem('todos');
@@ -111,39 +117,65 @@ const MainContent: React.FC<MainContentProps> = ({ currentView, onTodosUpdate })
         localStorage.removeItem('todos');
       }
 
-      // 2. 清理可能的跨用户数据污染
-      const allTodoKeys = Object.keys(localStorage).filter(key => key.startsWith('todos_'));
-      const currentUserId = user?._id || user?.email;
+      // 2. 验证registeredUsers数据完整性
+      const registeredUsers = JSON.parse(localStorage.getItem('registeredUsers') || '[]');
+      console.log(`🔍 Found ${registeredUsers.length} registered users`);
 
-      if (currentUserId) {
-        const currentUserKey = `todos_${currentUserId}`;
-        allTodoKeys.forEach(key => {
-          if (key !== currentUserKey) {
-            // 检查其他用户的数据是否被当前用户访问
-            try {
-              const otherUserTodos = JSON.parse(localStorage.getItem(key) || '[]');
-              const contaminatedTodos = otherUserTodos.filter((todo: Todo) =>
-                todo.user === currentUserId
-              );
+      // 3. 验证当前用户在注册列表中
+      const currentUserRecord = registeredUsers.find((u: any) =>
+        u.id === currentUserId || u.email === user?.email
+      );
 
-              if (contaminatedTodos.length > 0) {
-                console.log(`🚨 SECURITY: Found ${contaminatedTodos.length} contaminated todos in ${key}`);
-                // 移除被污染的数据
-                const cleanedTodos = otherUserTodos.filter((todo: Todo) =>
-                  todo.user !== currentUserId
-                );
-                localStorage.setItem(key, JSON.stringify(cleanedTodos));
-              }
-            } catch (error) {
-              console.error(`Error cleaning up ${key}:`, error);
-            }
-          }
-        });
+      if (!currentUserRecord) {
+        console.warn('⚠️ Current user not found in registered users list');
+      } else {
+        console.log('✅ Current user found in registered users list:', currentUserRecord.email);
       }
 
-      console.log('✅ Force data cleanup completed');
+      // 4. 验证用户数据键的一致性
+      const currentUserTodosKey = `todos_${currentUserId}`;
+      const currentUserApiKeyKey = `siliconflow_api_key_${currentUserId}`;
+
+      console.log('🔍 Current user data keys:');
+      console.log('  - Todos key:', currentUserTodosKey);
+      console.log('  - API key:', currentUserApiKeyKey);
+
+      // 5. 检查是否存在数据污染
+      const allTodoKeys = Object.keys(localStorage).filter(key => key.startsWith('todos_'));
+      let contaminationFound = false;
+
+      allTodoKeys.forEach(key => {
+        if (key !== currentUserTodosKey) {
+          try {
+            const otherUserTodos = JSON.parse(localStorage.getItem(key) || '[]');
+            const contaminatedTodos = otherUserTodos.filter((todo: Todo) =>
+              todo.user === currentUserId
+            );
+
+            if (contaminatedTodos.length > 0) {
+              console.warn(`🚨 SECURITY: Found ${contaminatedTodos.length} contaminated todos in ${key}`);
+              contaminationFound = true;
+
+              // 移除被污染的数据
+              const cleanedTodos = otherUserTodos.filter((todo: Todo) =>
+                todo.user !== currentUserId
+              );
+              localStorage.setItem(key, JSON.stringify(cleanedTodos));
+              console.log(`🔧 Cleaned contaminated data from ${key}`);
+            }
+          } catch (error) {
+            console.error(`Error validating ${key}:`, error);
+          }
+        }
+      });
+
+      if (!contaminationFound) {
+        console.log('✅ No data contamination found - user isolation is secure');
+      }
+
+      console.log('✅ User data isolation validation completed');
     } catch (error) {
-      console.error('❌ Error during force data cleanup:', error);
+      console.error('❌ Error during user data isolation validation:', error);
     }
   }, [user]);
 
@@ -251,13 +283,13 @@ const MainContent: React.FC<MainContentProps> = ({ currentView, onTodosUpdate })
   }, [token, user, API_URL, saveUserTodos]);
 
   useEffect(() => {
-    // 🚨 紧急安全修复：用户变化时强制执行数据清理
-    forceDataCleanup();
+    // 🔧 用户变化时验证数据隔离并初始化
+    validateUserDataIsolation();
     // 然后初始化用户专属数据
     initializeTodos();
     // 可选：尝试与后端同步（不阻塞本地功能）
     syncWithBackend();
-  }, [forceDataCleanup, initializeTodos, syncWithBackend]);
+  }, [validateUserDataIsolation, initializeTodos, syncWithBackend]);
 
   // Notify parent component when todos change
   useEffect(() => {
@@ -569,6 +601,128 @@ const MainContent: React.FC<MainContentProps> = ({ currentView, onTodosUpdate })
           localStorage.removeItem('user');
           localStorage.removeItem('token');
           console.log('✅ User data cleared');
+        },
+        // 🔧 用户数据隔离专用调试工具
+        validateUserIsolation: () => {
+          console.log('🔧 Validating user data isolation...');
+          validateUserDataIsolation();
+        },
+        getUserDataSummary: () => {
+          const currentUserId = user?._id || user?.email;
+          const registeredUsers = JSON.parse(localStorage.getItem('registeredUsers') || '[]');
+
+          // 获取所有用户的数据键
+          const allKeys = Object.keys(localStorage);
+          const todoKeys = allKeys.filter(key => key.startsWith('todos_'));
+          const apiKeyKeys = allKeys.filter(key => key.startsWith('siliconflow_api_key_'));
+
+          const summary = {
+            currentUser: {
+              id: currentUserId,
+              email: user?.email,
+              username: user?.username,
+            },
+            registeredUsers: {
+              total: registeredUsers.length,
+              users: registeredUsers.map((u: any) => ({
+                id: u.id,
+                email: u.email,
+                username: u.username,
+                registeredAt: u.registeredAt,
+                lastLogin: u.lastLogin,
+              })),
+            },
+            dataKeys: {
+              todoKeys: todoKeys.map(key => ({
+                key,
+                hasData: !!localStorage.getItem(key),
+                dataLength: localStorage.getItem(key) ? JSON.parse(localStorage.getItem(key) || '[]').length : 0,
+              })),
+              apiKeyKeys: apiKeyKeys.map(key => ({
+                key,
+                hasData: !!localStorage.getItem(key),
+              })),
+            },
+            isolation: {
+              currentUserTodosKey: currentUserId ? `todos_${currentUserId}` : null,
+              currentUserApiKeyKey: currentUserId ? `siliconflow_api_key_${currentUserId}` : null,
+            },
+          };
+
+          console.log('📊 User Data Summary:', summary);
+          return summary;
+        },
+        testMultiUserScenario: () => {
+          console.log('🧪 Testing multi-user scenario...');
+
+          const registeredUsers = JSON.parse(localStorage.getItem('registeredUsers') || '[]');
+          const currentUserId = user?._id || user?.email;
+
+          console.log(`Current user: ${currentUserId}`);
+          console.log(`Total registered users: ${registeredUsers.length}`);
+
+          // 检查每个用户的数据隔离
+          registeredUsers.forEach((regUser: any) => {
+            const userTodosKey = `todos_${regUser.id}`;
+            const userApiKeyKey = `siliconflow_api_key_${regUser.id}`;
+
+            const userTodos = localStorage.getItem(userTodosKey);
+            const userApiKey = localStorage.getItem(userApiKeyKey);
+
+            console.log(`User ${regUser.email}:`);
+            console.log(`  - Todos: ${userTodos ? JSON.parse(userTodos).length : 0} items`);
+            console.log(`  - API Key: ${userApiKey ? 'configured' : 'not configured'}`);
+
+            // 检查数据归属
+            if (userTodos) {
+              const todos = JSON.parse(userTodos);
+              const wrongOwnership = todos.filter((todo: Todo) =>
+                todo.user && todo.user !== regUser.id && todo.user !== regUser.email
+              );
+
+              if (wrongOwnership.length > 0) {
+                console.warn(`  ⚠️ Found ${wrongOwnership.length} todos with wrong ownership`);
+              } else {
+                console.log(`  ✅ All todos correctly owned`);
+              }
+            }
+          });
+
+          return {
+            currentUser: currentUserId,
+            totalUsers: registeredUsers.length,
+            isolationStatus: 'TESTED',
+          };
+        },
+        emergencyUserDataRepair: () => {
+          console.log('🚨 EMERGENCY: Starting user data repair...');
+
+          const registeredUsers = JSON.parse(localStorage.getItem('registeredUsers') || '[]');
+          let repairCount = 0;
+
+          // 修复每个用户的数据归属
+          registeredUsers.forEach((regUser: any) => {
+            const userTodosKey = `todos_${regUser.id}`;
+            const userTodos = localStorage.getItem(userTodosKey);
+
+            if (userTodos) {
+              const todos = JSON.parse(userTodos);
+              const repairedTodos = todos.map((todo: Todo) => ({
+                ...todo,
+                user: todo.user || regUser.id,
+              }));
+
+              localStorage.setItem(userTodosKey, JSON.stringify(repairedTodos));
+              repairCount++;
+            }
+          });
+
+          console.log(`🔧 Repaired data for ${repairCount} users`);
+
+          // 重新验证隔离
+          validateUserDataIsolation();
+
+          return { repairedUsers: repairCount };
         }
       };
       console.log('🛠️ Debug tools available: window.todoDebug');
