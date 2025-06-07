@@ -5,7 +5,7 @@
  * 实现个人密钥优先，平台密钥回退的安全机制
  */
 
-import { getApiKey } from './apiKeyManager';
+import { getApiKey, getCurrentUserId } from './apiKeyManager';
 
 // 🔒 平台密钥配置接口
 interface PlatformKeyConfig {
@@ -20,6 +20,8 @@ interface ApiKeyResult {
   keyType: 'personal' | 'platform';
   keySource: string;
   isValid: boolean;
+  model: string;
+  modelSource: 'user_choice' | 'platform_locked' | 'default';
 }
 
 /**
@@ -52,6 +54,121 @@ const getPlatformKeyConfig = (): PlatformKeyConfig => {
   }
   
   throw new Error('Platform API key not configured');
+};
+
+// 🤖 默认AI模型配置
+const DEFAULT_AI_MODEL = 'deepseek-ai/DeepSeek-R1-0528-Qwen3-8B';
+const PLATFORM_LOCKED_MODEL = 'deepseek-ai/DeepSeek-R1-0528-Qwen3-8B';
+
+// 🤖 可选的AI模型列表（供个人密钥用户选择）
+const AVAILABLE_AI_MODELS = [
+  'deepseek-ai/DeepSeek-R1-0528-Qwen3-8B',
+  'Qwen/Qwen3-8B',
+  'THUDM/GLM-Z1-9B-0414',
+  'deepseek-ai/DeepSeek-R1',
+  'Qwen/Qwen3-32B',
+  'THUDM/GLM-Z1-32B-0414',
+  'Pro/deepseek-ai/DeepSeek-V3'
+];
+
+/**
+ * 🤖 获取用户选择的AI模型
+ * Get user selected AI model
+ */
+export const getUserSelectedModel = (): string => {
+  try {
+    const currentUserId = getCurrentUserId();
+    if (!currentUserId) {
+      console.log('🤖 No current user, using default model');
+      return DEFAULT_AI_MODEL;
+    }
+
+    const modelKey = `ai_model_${currentUserId}`;
+    const savedModel = localStorage.getItem(modelKey);
+
+    if (savedModel && AVAILABLE_AI_MODELS.includes(savedModel)) {
+      console.log(`🤖 Using user selected model: ${savedModel}`);
+      return savedModel;
+    }
+
+    console.log(`🤖 No valid user model found, using default: ${DEFAULT_AI_MODEL}`);
+    return DEFAULT_AI_MODEL;
+  } catch (error) {
+    console.error('❌ Error getting user selected model:', error);
+    return DEFAULT_AI_MODEL;
+  }
+};
+
+/**
+ * 🤖 保存用户选择的AI模型
+ * Save user selected AI model
+ */
+export const saveUserSelectedModel = (model: string): boolean => {
+  try {
+    const currentUserId = getCurrentUserId();
+    if (!currentUserId) {
+      console.warn('⚠️ Cannot save model: No current user');
+      return false;
+    }
+
+    // 验证模型是否在可选列表中
+    if (!AVAILABLE_AI_MODELS.includes(model)) {
+      console.warn(`⚠️ Invalid model selection: ${model}`);
+      return false;
+    }
+
+    const modelKey = `ai_model_${currentUserId}`;
+    localStorage.setItem(modelKey, model);
+    console.log(`🤖 Saved user model selection: ${model}`);
+    return true;
+  } catch (error) {
+    console.error('❌ Error saving user selected model:', error);
+    return false;
+  }
+};
+
+/**
+ * 🤖 获取AI模型配置（根据密钥类型）
+ * Get AI model configuration based on key type
+ */
+export const getAiModelConfig = (keyType: 'personal' | 'platform'): {
+  model: string;
+  modelSource: 'user_choice' | 'platform_locked' | 'default';
+  canUserModify: boolean;
+} => {
+  if (keyType === 'platform') {
+    // 🔒 平台密钥强制使用锁定模型
+    return {
+      model: PLATFORM_LOCKED_MODEL,
+      modelSource: 'platform_locked',
+      canUserModify: false,
+    };
+  }
+
+  // 🤖 个人密钥允许用户选择模型
+  const userModel = getUserSelectedModel();
+  return {
+    model: userModel,
+    modelSource: userModel === DEFAULT_AI_MODEL ? 'default' : 'user_choice',
+    canUserModify: true,
+  };
+};
+
+/**
+ * 🤖 获取可用的AI模型列表
+ * Get available AI models list
+ */
+export const getAvailableAiModels = (): string[] => {
+  return [...AVAILABLE_AI_MODELS];
+};
+
+/**
+ * 🤖 检查用户是否可以修改AI模型
+ * Check if user can modify AI model
+ */
+export const canUserModifyModel = (): boolean => {
+  const hasPersonal = hasPersonalApiKey();
+  return hasPersonal;
 };
 
 /**
@@ -114,26 +231,34 @@ export const getAiApiKey = (): ApiKeyResult | null => {
     // 🔒 第一优先级：尝试获取用户个人API密钥
     const personalKey = getApiKey();
     if (personalKey && personalKey.trim().length > 0) {
+      const modelConfig = getAiModelConfig('personal');
       console.log('✅ Using personal API key for AI generation');
+      console.log(`🤖 Model: ${modelConfig.model} (${modelConfig.modelSource})`);
       return {
         apiKey: personalKey,
         keyType: 'personal',
         keySource: 'user_configuration',
         isValid: true,
+        model: modelConfig.model,
+        modelSource: modelConfig.modelSource,
       };
     }
-    
+
     console.log('ℹ️ No personal API key found, falling back to platform key');
-    
+
     // 🔒 第二优先级：使用平台公用API密钥
     const platformKey = getPlatformApiKey();
     if (platformKey && platformKey.trim().length > 0) {
+      const modelConfig = getAiModelConfig('platform');
       console.log('✅ Using platform API key for AI generation');
+      console.log(`🤖 Model: ${modelConfig.model} (locked for platform key)`);
       return {
         apiKey: platformKey,
         keyType: 'platform',
         keySource: 'platform_configuration',
         isValid: true,
+        model: modelConfig.model,
+        modelSource: modelConfig.modelSource,
       };
     }
     
@@ -154,28 +279,51 @@ export const getApiKeyStatus = (): {
   hasPlatformKey: boolean;
   currentKeyType: 'personal' | 'platform' | 'none';
   userMessage: string;
+  modelInfo: {
+    currentModel: string;
+    modelSource: string;
+    canModify: boolean;
+  };
 } => {
   const hasPersonal = hasPersonalApiKey();
   const platformAvailable = !!getPlatformApiKey();
-  
+
   let currentKeyType: 'personal' | 'platform' | 'none' = 'none';
   let userMessage = '';
-  
+  let modelInfo = {
+    currentModel: DEFAULT_AI_MODEL,
+    modelSource: 'default',
+    canModify: false,
+  };
+
   if (hasPersonal) {
     currentKeyType = 'personal';
-    userMessage = '正在使用您的个人API密钥进行AI生成';
+    const modelConfig = getAiModelConfig('personal');
+    modelInfo = {
+      currentModel: modelConfig.model,
+      modelSource: modelConfig.modelSource,
+      canModify: modelConfig.canUserModify,
+    };
+    userMessage = `正在使用您的个人API密钥进行AI生成（模型：${modelConfig.model}）`;
   } else if (platformAvailable) {
     currentKeyType = 'platform';
-    userMessage = '正在使用平台提供的API密钥进行AI生成';
+    const modelConfig = getAiModelConfig('platform');
+    modelInfo = {
+      currentModel: modelConfig.model,
+      modelSource: modelConfig.modelSource,
+      canModify: modelConfig.canUserModify,
+    };
+    userMessage = `正在使用平台提供的API密钥进行AI生成（模型：${modelConfig.model}）`;
   } else {
     userMessage = 'AI功能暂时不可用，请配置API密钥或联系管理员';
   }
-  
+
   return {
     hasPersonalKey: hasPersonal,
     hasPlatformKey: platformAvailable,
     currentKeyType,
     userMessage,
+    modelInfo,
   };
 };
 
@@ -233,21 +381,27 @@ export const testApiKeyConnection = async (keyType: 'personal' | 'platform' | 'a
     if (keyType === 'personal') {
       const personalKey = getApiKey();
       if (personalKey) {
+        const modelConfig = getAiModelConfig('personal');
         apiKeyResult = {
           apiKey: personalKey,
           keyType: 'personal',
           keySource: 'user_configuration',
           isValid: true,
+          model: modelConfig.model,
+          modelSource: modelConfig.modelSource,
         };
       }
     } else if (keyType === 'platform') {
       const platformKey = getPlatformApiKey();
       if (platformKey) {
+        const modelConfig = getAiModelConfig('platform');
         apiKeyResult = {
           apiKey: platformKey,
           keyType: 'platform',
           keySource: 'platform_configuration',
           isValid: true,
+          model: modelConfig.model,
+          modelSource: modelConfig.modelSource,
         };
       }
     } else {

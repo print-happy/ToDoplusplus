@@ -6,7 +6,7 @@ import { useAuth } from '../contexts/AuthContext';
 import Settings from './Settings';
 import { getApiKeyWithPrompt, sanitizeApiKeyForLogging, getAllUserApiKeys, clearAllApiKeys, testApiKeyIsolation, getApiKeyAccessLogs, clearApiKeyAccessLogs } from '../utils/apiKeyManager';
 import { emergencyCompleteCleanup, secureUserSwitchCleanup, performSecurityCheck, autoFixDataIsolation } from '../utils/emergencyCleanup';
-import { getAiApiKey, getApiKeyStatus, getSecureApiKeyInfo, hasPersonalApiKey, testApiKeyConnection } from '../utils/aiApiKeyManager';
+import { getAiApiKey, getApiKeyStatus, getSecureApiKeyInfo, hasPersonalApiKey, testApiKeyConnection, getAvailableAiModels, getUserSelectedModel, canUserModifyModel } from '../utils/aiApiKeyManager';
 
 interface Todo {
   _id: string;
@@ -794,6 +794,103 @@ const MainContent: React.FC<MainContentProps> = ({ currentView, onTodosUpdate })
           } : 'No key available');
 
           return scenarios;
+        },
+        // 🤖 AI模型选择调试工具
+        testAiModelSelection: () => {
+          console.log('🤖 Testing AI model selection mechanism...');
+
+          const hasPersonal = hasPersonalApiKey();
+          const canModify = canUserModifyModel();
+          const userModel = getUserSelectedModel();
+          const availableModels = getAvailableAiModels();
+          const apiKeyResult = getAiApiKey();
+          const keyStatus = getApiKeyStatus();
+
+          const modelTest = {
+            timestamp: new Date().toISOString(),
+            personalKeyConfigured: hasPersonal,
+            canModifyModel: canModify,
+            userSelectedModel: userModel,
+            availableModels: availableModels,
+            currentApiKeyResult: apiKeyResult ? {
+              keyType: apiKeyResult.keyType,
+              model: apiKeyResult.model,
+              modelSource: apiKeyResult.modelSource,
+            } : null,
+            keyStatus: {
+              currentKeyType: keyStatus.currentKeyType,
+              modelInfo: keyStatus.modelInfo,
+            },
+            modelSelectionLogic: {
+              personalKey: hasPersonal ? `User can select from ${availableModels.length} models` : 'Not applicable',
+              platformKey: !hasPersonal ? 'Locked to deepseek-ai/DeepSeek-R1-0528-Qwen3-8B' : 'Not applicable',
+            },
+          };
+
+          console.log('🤖 AI Model Selection Test Results:', modelTest);
+          return modelTest;
+        },
+        getAiModelInfo: () => {
+          const info = {
+            userSelectedModel: getUserSelectedModel(),
+            canUserModify: canUserModifyModel(),
+            availableModels: getAvailableAiModels(),
+            currentStatus: getApiKeyStatus().modelInfo,
+          };
+
+          console.log('🤖 AI Model Information:', info);
+          return info;
+        },
+        simulateModelScenarios: () => {
+          console.log('🤖 Simulating different AI model scenarios...');
+
+          const scenarios = [
+            {
+              name: 'Personal key user with custom model',
+              hasPersonalKey: true,
+              expectedCanModify: true,
+              expectedModelSource: 'user_choice',
+            },
+            {
+              name: 'Personal key user with default model',
+              hasPersonalKey: true,
+              expectedCanModify: true,
+              expectedModelSource: 'default',
+            },
+            {
+              name: 'Platform key user',
+              hasPersonalKey: false,
+              expectedCanModify: false,
+              expectedModelSource: 'platform_locked',
+            },
+          ];
+
+          const currentHasPersonal = hasPersonalApiKey();
+          const currentCanModify = canUserModifyModel();
+          const currentApiResult = getAiApiKey();
+
+          scenarios.forEach(scenario => {
+            console.log(`📋 Scenario: ${scenario.name}`);
+            console.log(`  - Has personal key: ${scenario.hasPersonalKey}`);
+            console.log(`  - Expected can modify: ${scenario.expectedCanModify}`);
+            console.log(`  - Expected model source: ${scenario.expectedModelSource}`);
+          });
+
+          console.log('🤖 Current actual state:');
+          console.log(`  - Has personal key: ${currentHasPersonal}`);
+          console.log(`  - Can modify model: ${currentCanModify}`);
+          console.log(`  - Current model: ${currentApiResult?.model || 'N/A'}`);
+          console.log(`  - Model source: ${currentApiResult?.modelSource || 'N/A'}`);
+
+          return {
+            scenarios,
+            currentState: {
+              hasPersonalKey: currentHasPersonal,
+              canModify: currentCanModify,
+              model: currentApiResult?.model,
+              modelSource: currentApiResult?.modelSource,
+            },
+          };
         }
       };
       console.log('🛠️ Debug tools available: window.todoDebug');
@@ -1109,7 +1206,7 @@ const MainContent: React.FC<MainContentProps> = ({ currentView, onTodosUpdate })
           'Authorization': `Bearer ${apiKeyResult.apiKey}`,
         },
         body: JSON.stringify({
-          model: 'deepseek-ai/DeepSeek-R1-0528-Qwen3-8B',
+          model: apiKeyResult.model,
           messages: [
             {
               role: 'system',
@@ -1225,10 +1322,10 @@ const MainContent: React.FC<MainContentProps> = ({ currentView, onTodosUpdate })
             setTodos(updatedTodos);
             saveUserTodos(updatedTodos);
 
-            // 🔑 根据API密钥类型显示不同的成功消息
-            const successMessage = apiKeyResult.keyType === 'personal'
-              ? `AI成功生成了${newTodos.length}个任务（使用个人密钥）`
-              : `AI成功生成了${newTodos.length}个任务（使用平台密钥）`;
+            // 🔑🤖 根据API密钥类型和模型显示详细的成功消息
+            const keyTypeText = apiKeyResult.keyType === 'personal' ? '个人密钥' : '平台密钥';
+            const modelText = apiKeyResult.model.split('/').pop() || apiKeyResult.model;
+            const successMessage = `AI成功生成了${newTodos.length}个任务（${keyTypeText} - ${modelText}）`;
             message.success(successMessage);
 
             // 清除输入和设置
@@ -1259,10 +1356,10 @@ const MainContent: React.FC<MainContentProps> = ({ currentView, onTodosUpdate })
             setTodos(updatedTodos);
             saveUserTodos(updatedTodos);
 
-            // 🔑 根据API密钥类型显示不同的成功消息
-            const successMessage = apiKeyResult.keyType === 'personal'
-              ? 'AI生成任务成功（使用个人密钥）'
-              : 'AI生成任务成功（使用平台密钥）';
+            // 🔑🤖 根据API密钥类型和模型显示详细的成功消息
+            const keyTypeText = apiKeyResult.keyType === 'personal' ? '个人密钥' : '平台密钥';
+            const modelText = apiKeyResult.model.split('/').pop() || apiKeyResult.model;
+            const successMessage = `AI生成任务成功（${keyTypeText} - ${modelText}）`;
             message.success(successMessage);
 
             // 清除输入和设置
@@ -1294,10 +1391,10 @@ const MainContent: React.FC<MainContentProps> = ({ currentView, onTodosUpdate })
           setTodos(updatedTodos);
           saveUserTodos(updatedTodos);
 
-          // 🔑 根据API密钥类型显示不同的成功消息
-          const successMessage = apiKeyResult.keyType === 'personal'
-            ? 'AI生成任务成功（使用个人密钥）'
-            : 'AI生成任务成功（使用平台密钥）';
+          // 🔑🤖 根据API密钥类型和模型显示详细的成功消息
+          const keyTypeText = apiKeyResult.keyType === 'personal' ? '个人密钥' : '平台密钥';
+          const modelText = apiKeyResult.model.split('/').pop() || apiKeyResult.model;
+          const successMessage = `AI生成任务成功（${keyTypeText} - ${modelText}）`;
           message.success(successMessage);
 
           // 清除输入和设置

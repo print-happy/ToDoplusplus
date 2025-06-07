@@ -53,7 +53,7 @@ const logApiKeyAccess = (action: ApiKeyAccessLog['action'], success: boolean, se
 /**
  * Gets current user ID for API key management
  */
-const getCurrentUserId = (): string | null => {
+export const getCurrentUserId = (): string | null => {
   try {
     const userStr = localStorage.getItem('user');
     if (userStr) {
