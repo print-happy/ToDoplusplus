@@ -1,0 +1,72 @@
+# 🚀 TODO++ 生产环境 Nginx Dockerfile
+# 多阶段构建，优化镜像大小和安全性
+
+# 第一阶段：构建前端应用
+FROM node:18-alpine AS frontend-builder
+
+# 设置工作目录
+WORKDIR /app
+
+# 复制前端源码
+COPY ../frontend/package*.json ./
+RUN npm ci --only=production
+
+COPY ../frontend/ ./
+
+# 构建生产版本
+ENV NODE_ENV=production
+RUN npm run build
+
+# 第二阶段：Nginx生产镜像
+FROM nginx:1.25-alpine
+
+# 安装必要的工具
+RUN apk add --no-cache \
+    openssl \
+    curl \
+    tzdata \
+    && rm -rf /var/cache/apk/*
+
+# 设置时区
+ENV TZ=Asia/Shanghai
+RUN ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && echo $TZ > /etc/timezone
+
+# 创建必要的目录
+RUN mkdir -p /var/log/nginx \
+    /var/cache/nginx \
+    /etc/nginx/ssl \
+    /var/www/certbot \
+    /usr/share/nginx/html
+
+# 复制nginx配置
+COPY nginx.prod.conf /etc/nginx/nginx.conf
+
+# 复制构建好的前端文件
+COPY --from=frontend-builder /app/dist /usr/share/nginx/html
+
+# 创建自签名证书（开发用，生产环境应使用真实证书）
+RUN openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
+    -keyout /etc/nginx/ssl/key.pem \
+    -out /etc/nginx/ssl/cert.pem \
+    -subj "/C=CN/ST=State/L=City/O=Organization/CN=localhost"
+
+# 设置正确的权限
+RUN chown -R nginx:nginx /var/log/nginx \
+    /var/cache/nginx \
+    /usr/share/nginx/html \
+    && chmod -R 755 /usr/share/nginx/html
+
+# 创建健康检查脚本
+RUN echo '#!/bin/sh' > /usr/local/bin/health-check.sh \
+    && echo 'curl -f http://localhost:8080/health || exit 1' >> /usr/local/bin/health-check.sh \
+    && chmod +x /usr/local/bin/health-check.sh
+
+# 暴露端口
+EXPOSE 80 443 8080
+
+# 健康检查
+HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
+    CMD /usr/local/bin/health-check.sh
+
+# 启动nginx
+CMD ["nginx", "-g", "daemon off;"]

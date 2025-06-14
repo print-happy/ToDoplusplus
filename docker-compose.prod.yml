@@ -1,171 +1,233 @@
-# docker-compose.prod.yml
-# 生产环境 Docker Compose 配置
+# 🚀 TODO++ 生产环境 Docker Compose 配置
+# 优化的安全性、性能和可靠性配置
 
 version: '3.8'
 
 services:
-  # 1. 后端服务 (生产环境)
+  # MongoDB数据库
+  mongo:
+    image: mongo:7.0
+    container_name: todo-mongo-prod
+    restart: unless-stopped
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: ${MONGO_ROOT_USERNAME:-admin}
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_ROOT_PASSWORD}
+      MONGO_INITDB_DATABASE: ${MONGO_DATABASE:-todoapp}
+    volumes:
+      - mongo_data:/data/db
+      - mongo_config:/data/configdb
+      - ./logs/mongo:/var/log/mongodb
+    networks:
+      - todo-network
+    command: mongod --auth --logpath /var/log/mongodb/mongod.log --logappend
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+          cpus: '0.5'
+        reservations:
+          memory: 512M
+          cpus: '0.25'
+
+  # 后端API服务
   backend:
-    build:
-      context: ./backend
-      dockerfile: Dockerfile.prod
+    image: ${DOCKER_USERNAME}/todo-plusplus-backend:${IMAGE_TAG:-latest}
     container_name: todo-backend-prod
     restart: unless-stopped
-    ports:
-      - "5000:5000"
-    env_file:
-      - ./backend/.env
     environment:
-      - NODE_ENV=production
-    depends_on:
-      - mongodb
-    networks:
-      - app-network
+      NODE_ENV: production
+      PORT: 5000
+      MONGODB_URI: mongodb://${MONGO_ROOT_USERNAME:-admin}:${MONGO_ROOT_PASSWORD}@mongo:27017/${MONGO_DATABASE:-todoapp}?authSource=admin
+      JWT_SECRET: ${JWT_SECRET}
+      CORS_ORIGIN: ${CORS_ORIGIN:-https://localhost}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      NODE_OPTIONS: "--max-old-space-size=512"
     volumes:
-      - ./logs:/app/logs  # 日志文件挂载
+      - ./logs/backend:/app/logs
+    networks:
+      - todo-network
+    depends_on:
+      mongo:
+        condition: service_healthy
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:5000/health"]
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 40s
+      start_period: 30s
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: '0.5'
+        reservations:
+          memory: 256M
+          cpus: '0.25'
 
-  # 2. 前端服务 (生产环境 - Nginx)
-  frontend:
-    build:
-      context: ./frontend
-      dockerfile: Dockerfile.prod
-    container_name: todo-frontend-prod
-    restart: unless-stopped
-    ports:
-      - "80:80"
-      - "443:443"  # HTTPS端口
-    depends_on:
-      - backend
-    networks:
-      - app-network
-    volumes:
-      - ./ssl:/etc/nginx/ssl:ro  # SSL证书挂载 (如果有)
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:80"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-
-  # 3. 数据库服务 (生产环境)
-  mongodb:
-    image: mongo:5.0
-    container_name: todo-db-prod
-    restart: unless-stopped
-    ports:
-      - "27017:27017"
-    environment:
-      - MONGO_INITDB_ROOT_USERNAME=admin
-      - MONGO_INITDB_ROOT_PASSWORD=your-strong-password
-      - MONGO_INITDB_DATABASE=todoapp
-    volumes:
-      - mongo-data-prod:/data/db
-      - ./mongodb/init:/docker-entrypoint-initdb.d:ro  # 初始化脚本
-      - ./backups:/backups  # 备份目录
-    networks:
-      - app-network
-    command: mongod --auth
-    healthcheck:
-      test: echo 'db.runCommand("ping").ok' | mongosh localhost:27017/todoapp --quiet
-      interval: 30s
-      timeout: 10s
-      retries: 3
-
-  # 4. Redis缓存 (可选)
-  redis:
-    image: redis:7-alpine
-    container_name: todo-redis-prod
-    restart: unless-stopped
-    ports:
-      - "6379:6379"
-    volumes:
-      - redis-data-prod:/data
-    networks:
-      - app-network
-    command: redis-server --appendonly yes --requirepass your-redis-password
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-
-  # 5. Nginx反向代理 (可选)
+  # Nginx反向代理
   nginx:
-    image: nginx:alpine
+    image: ${DOCKER_USERNAME}/todo-plusplus-nginx:${IMAGE_TAG:-latest}
     container_name: todo-nginx-prod
     restart: unless-stopped
     ports:
-      - "8080:80"
-      - "8443:443"
+      - "80:80"
+      - "443:443"
+      - "8080:8080"  # 监控端口（仅内网）
     volumes:
-      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
-      - ./nginx/conf.d:/etc/nginx/conf.d:ro
       - ./ssl:/etc/nginx/ssl:ro
       - ./logs/nginx:/var/log/nginx
+      - certbot_www:/var/www/certbot:ro
+      - certbot_conf:/etc/letsencrypt:ro
+    networks:
+      - todo-network
     depends_on:
-      - frontend
-      - backend
-    networks:
-      - app-network
+      backend:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/health-check.sh"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+          cpus: '0.25'
+        reservations:
+          memory: 128M
+          cpus: '0.1'
 
-  # 6. 监控服务 (可选)
-  prometheus:
-    image: prom/prometheus:latest
-    container_name: todo-prometheus-prod
-    restart: unless-stopped
-    ports:
-      - "9090:9090"
+  # Certbot for Let's Encrypt SSL certificates
+  certbot:
+    image: certbot/certbot:latest
+    container_name: todo-certbot-prod
     volumes:
-      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
-      - prometheus-data:/prometheus
+      - certbot_www:/var/www/certbot
+      - certbot_conf:/etc/letsencrypt
+      - ./logs/certbot:/var/log/letsencrypt
     networks:
-      - app-network
-    command:
-      - '--config.file=/etc/prometheus/prometheus.yml'
-      - '--storage.tsdb.path=/prometheus'
-      - '--web.console.libraries=/etc/prometheus/console_libraries'
-      - '--web.console.templates=/etc/prometheus/consoles'
+      - todo-network
+    command: certonly --webroot --webroot-path=/var/www/certbot --email ${SSL_EMAIL} --agree-tos --no-eff-email -d ${DOMAIN_NAME}
+    profiles:
+      - ssl-init  # 仅在SSL初始化时运行
 
-  # 7. 日志收集 (可选)
-  fluentd:
-    image: fluent/fluentd:v1.16-debian-1
-    container_name: todo-fluentd-prod
+  # 日志管理和轮转
+  logrotate:
+    image: alpine:latest
+    container_name: todo-logrotate-prod
     restart: unless-stopped
     volumes:
-      - ./fluentd/conf:/fluentd/etc
-      - ./logs:/var/log
+      - ./logs:/logs
+      - ./scripts/logrotate.conf:/etc/logrotate.conf:ro
     networks:
-      - app-network
+      - todo-network
+    command: >
+      sh -c "
+        apk add --no-cache logrotate &&
+        while true; do
+          logrotate -f /etc/logrotate.conf
+          sleep 86400
+        done
+      "
+    deploy:
+      resources:
+        limits:
+          memory: 64M
+          cpus: '0.1'
+
+  # 监控和健康检查
+  healthcheck:
+    image: alpine:latest
+    container_name: todo-healthcheck-prod
+    restart: unless-stopped
+    volumes:
+      - ./scripts/healthcheck.sh:/healthcheck.sh:ro
+      - ./logs/healthcheck:/logs
+    networks:
+      - todo-network
     depends_on:
+      - nginx
       - backend
-      - frontend
+      - mongo
+    command: >
+      sh -c "
+        apk add --no-cache curl &&
+        chmod +x /healthcheck.sh &&
+        while true; do
+          /healthcheck.sh
+          sleep 60
+        done
+      "
+    deploy:
+      resources:
+        limits:
+          memory: 64M
+          cpus: '0.1'
 
-# 定义网络
+  # 数据库备份服务
+  backup:
+    image: mongo:7.0
+    container_name: todo-backup-prod
+    restart: "no"
+    environment:
+      MONGO_ROOT_USERNAME: ${MONGO_ROOT_USERNAME:-admin}
+      MONGO_ROOT_PASSWORD: ${MONGO_ROOT_PASSWORD}
+      MONGO_DATABASE: ${MONGO_DATABASE:-todoapp}
+    volumes:
+      - ./backups:/backups
+      - ./scripts/backup.sh:/backup.sh:ro
+    networks:
+      - todo-network
+    depends_on:
+      mongo:
+        condition: service_healthy
+    command: >
+      sh -c "
+        chmod +x /backup.sh &&
+        /backup.sh
+      "
+    profiles:
+      - backup  # 仅在备份时运行
+
+# 网络配置
 networks:
-  app-network:
+  todo-network:
     driver: bridge
     ipam:
       config:
         - subnet: 172.20.0.0/16
 
-# 定义数据卷
+# 数据卷配置
 volumes:
-  mongo-data-prod:
+  # 数据库数据持久化
+  mongo_data:
     driver: local
-  redis-data-prod:
+    driver_opts:
+      type: none
+      o: bind
+      device: ${DATA_PATH:-./data}/mongo
+
+  mongo_config:
     driver: local
-  prometheus-data:
+    driver_opts:
+      type: none
+      o: bind
+      device: ${DATA_PATH:-./data}/mongo-config
+
+  # SSL证书
+  certbot_www:
     driver: local
 
-# 生产环境配置说明:
-# 1. 所有服务都配置了健康检查
-# 2. 数据库启用了认证
-# 3. 支持SSL/HTTPS配置
-# 4. 包含监控和日志收集服务
-# 5. 数据持久化到命名卷
-# 6. 网络隔离和安全配置
+  certbot_conf:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ${DATA_PATH:-./data}/letsencrypt
