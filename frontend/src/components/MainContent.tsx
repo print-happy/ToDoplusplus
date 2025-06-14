@@ -40,6 +40,15 @@ const MainContent: React.FC<MainContentProps> = ({ currentView, onTodosUpdate })
   const [showDatePicker, setShowDatePicker] = useState(false);
   const [reminderTime, setReminderTime] = useState<string>('');
   const [showReminderPicker, setShowReminderPicker] = useState(false);
+
+  // 🔔 功能3：待办提醒通知系统
+  const [reminderNotifications, setReminderNotifications] = useState<{
+    id: string;
+    todo: Todo;
+    timestamp: number;
+  }[]>([]);
+  const [audioContext, setAudioContext] = useState<AudioContext | null>(null);
+  const [reminderSound, setReminderSound] = useState<AudioBuffer | null>(null);
   const [showSettings, setShowSettings] = useState(false);
   const [showCustomDatePicker, setShowCustomDatePicker] = useState(false);
   const [customDate, setCustomDate] = useState('');
@@ -1199,6 +1208,7 @@ const MainContent: React.FC<MainContentProps> = ({ currentView, onTodosUpdate })
     }
   };
 
+  // ⭐ 功能1：重要待办栏的星标同步机制
   const toggleStar = async (id: string) => {
     const todo = todos.find(t => t._id === id);
     if (!todo) {
@@ -1208,7 +1218,7 @@ const MainContent: React.FC<MainContentProps> = ({ currentView, onTodosUpdate })
 
     const newStarred = !todo.isStarred;
 
-    console.log(`Toggling star for todo ${id} from ${todo.isStarred} to ${newStarred}`);
+    console.log(`⭐ Toggling star for todo "${todo.title}" (${id}) from ${todo.isStarred} to ${newStarred}`);
 
     // 立即更新本地状态以提供即时反馈
     const updatedTodos = todos.map(t =>
@@ -1218,10 +1228,23 @@ const MainContent: React.FC<MainContentProps> = ({ currentView, onTodosUpdate })
 
     // 保存到用户专属的localStorage
     saveUserTodos(updatedTodos);
-    console.log('Star state saved to user-specific localStorage:', updatedTodos);
+    console.log('⭐ Star state saved to user-specific localStorage');
 
-    // 显示成功消息
-    message.success(`任务已${newStarred ? '添加到' : '移出'}重要列表`);
+    // ⭐ 增强的用户反馈消息
+    if (newStarred) {
+      message.success(`⭐ "${todo.title}" 已添加到重要待办栏`);
+      console.log(`⭐ Task "${todo.title}" is now starred and will appear in Important view`);
+    } else {
+      message.info(`"${todo.title}" 已从重要待办栏中移除`);
+      console.log(`⭐ Task "${todo.title}" is no longer starred and will be removed from Important view`);
+    }
+
+    // ⭐ 星标同步机制：确保重要待办栏实时更新
+    // 由于我们使用的是响应式状态管理，filteredTodos会自动重新计算
+    // 当前视图如果是"重要"，会立即反映星标状态的变化
+    if (currentView === 'important') {
+      console.log('⭐ Currently in Important view - changes will be immediately visible');
+    }
 
     // 可选：尝试更新后端（不阻塞本地功能）
     if (token) {
@@ -1229,7 +1252,7 @@ const MainContent: React.FC<MainContentProps> = ({ currentView, onTodosUpdate })
         await axios.put(`${API_URL}/todos/${id}`, { isStarred: newStarred }, {
           headers: { Authorization: `Bearer ${token}` },
         });
-        console.log('Star state synced to backend successfully');
+        console.log('⭐ Star state synced to backend successfully');
       } catch (error) {
         console.log('Backend sync failed for star toggle, but local state is preserved:', error);
         // 不回滚本地状态，因为本地操作已经成功
@@ -1256,8 +1279,10 @@ const MainContent: React.FC<MainContentProps> = ({ currentView, onTodosUpdate })
 
     switch (currentView) {
       case 'important':
+        // ⭐ 功能1：在重要待办栏中创建的新待办事项自动设置为星标
         taskProperties.isStarred = true;
         taskProperties.viewCategory = 'important';
+        console.log('⭐ Creating task in Important view - automatically starred');
         break;
       case 'my-day':
         taskProperties.dueDate = dayjs().toISOString(); // Today
@@ -1313,7 +1338,14 @@ const MainContent: React.FC<MainContentProps> = ({ currentView, onTodosUpdate })
     // 保存到用户专属的localStorage
     saveUserTodos(updatedTodos);
 
-    message.success('任务创建成功!');
+    // ⭐ 功能1：根据视图提供特定的成功消息
+    if (currentView === 'important') {
+      message.success('⭐ 重要任务创建成功！已自动标记为星标');
+    } else if (currentView === 'my-day') {
+      message.success('📅 今日任务创建成功！');
+    } else {
+      message.success('任务创建成功!');
+    }
 
     try {
       // 尝试同步到后端
@@ -1767,30 +1799,269 @@ const MainContent: React.FC<MainContentProps> = ({ currentView, onTodosUpdate })
     return titles[view as keyof typeof titles] || '任务';
   };
 
+  // 📅 功能2：实时日期更新机制
+  const [currentDate, setCurrentDate] = useState(() => dayjs().startOf('day'));
+
+  // 🔔 功能3：提醒通知系统初始化
+  useEffect(() => {
+    // 初始化音频上下文
+    const initAudio = async () => {
+      try {
+        const ctx = new (window.AudioContext || (window as any).webkitAudioContext)();
+        setAudioContext(ctx);
+
+        // 创建简单的提醒音效
+        const createReminderSound = () => {
+          const sampleRate = ctx.sampleRate;
+          const duration = 0.5; // 0.5秒
+          const buffer = ctx.createBuffer(1, sampleRate * duration, sampleRate);
+          const data = buffer.getChannelData(0);
+
+          // 生成简单的铃声音效
+          for (let i = 0; i < data.length; i++) {
+            const t = i / sampleRate;
+            data[i] = Math.sin(2 * Math.PI * 800 * t) * Math.exp(-t * 3) * 0.3;
+          }
+
+          return buffer;
+        };
+
+        setReminderSound(createReminderSound());
+        console.log('🔔 Audio context initialized for reminders');
+      } catch (error) {
+        console.warn('🔔 Audio initialization failed:', error);
+      }
+    };
+
+    initAudio();
+
+    // 请求通知权限
+    if ('Notification' in window && Notification.permission === 'default') {
+      Notification.requestPermission().then(permission => {
+        if (permission === 'granted') {
+          console.log('🔔 Notification permission granted');
+          message.success('已开启浏览器通知，您将收到待办提醒');
+        } else {
+          console.log('🔔 Notification permission denied');
+          message.info('您可以在浏览器设置中开启通知权限以接收提醒');
+        }
+      });
+    }
+  }, []);
+
+  // 🔔 提醒检查和通知系统
+  useEffect(() => {
+    const checkReminders = () => {
+      const now = new Date();
+
+      todos.forEach(todo => {
+        if (todo.status === 'pending' && todo.description?.includes('提醒:')) {
+          // 解析提醒时间
+          const reminderMatch = todo.description.match(/提醒:\s*(.+?)(?:\s|$)/);
+          if (reminderMatch) {
+            const reminderText = reminderMatch[1];
+            const dueDate = new Date(todo.dueDate);
+
+            // 计算提醒时间
+            let reminderTime = new Date(dueDate);
+
+            if (reminderText.includes('分钟前')) {
+              const minutes = parseInt(reminderText);
+              reminderTime = new Date(dueDate.getTime() - minutes * 60 * 1000);
+            } else if (reminderText.includes('小时前')) {
+              const hours = parseInt(reminderText);
+              reminderTime = new Date(dueDate.getTime() - hours * 60 * 60 * 1000);
+            } else if (reminderText.includes('天前')) {
+              const days = parseInt(reminderText);
+              reminderTime = new Date(dueDate.getTime() - days * 24 * 60 * 60 * 1000);
+            } else if (reminderText.includes('周前')) {
+              const weeks = parseInt(reminderText);
+              reminderTime = new Date(dueDate.getTime() - weeks * 7 * 24 * 60 * 60 * 1000);
+            }
+
+            // 检查是否到了提醒时间（允许1分钟误差）
+            const timeDiff = Math.abs(now.getTime() - reminderTime.getTime());
+            if (timeDiff <= 60000) { // 1分钟内
+              // 检查是否已经提醒过
+              const alreadyNotified = reminderNotifications.some(
+                notification => notification.todo._id === todo._id
+              );
+
+              if (!alreadyNotified) {
+                showReminderNotification(todo);
+              }
+            }
+          }
+        }
+      });
+    };
+
+    // 每30秒检查一次提醒
+    const reminderInterval = setInterval(checkReminders, 30000);
+
+    return () => clearInterval(reminderInterval);
+  }, [todos, reminderNotifications]);
+
+  // 每分钟检查日期变更，确保"我的一天"视图实时更新
+  useEffect(() => {
+    const checkDateChange = () => {
+      const now = dayjs().startOf('day');
+      if (!now.isSame(currentDate, 'day')) {
+        console.log('📅 Date changed, updating My Day view');
+        setCurrentDate(now);
+        if (currentView === 'my-day') {
+          message.info('日期已更新，我的一天视图已刷新');
+        }
+      }
+    };
+
+    // 立即检查一次
+    checkDateChange();
+
+    // 每分钟检查一次日期变更
+    const interval = setInterval(checkDateChange, 60000);
+
+    return () => clearInterval(interval);
+  }, [currentDate, currentView]);
+
+  // 🔔 显示提醒通知
+  const showReminderNotification = (todo: Todo) => {
+    console.log(`🔔 Showing reminder for: "${todo.title}"`);
+
+    // 播放提醒音效
+    if (audioContext && reminderSound) {
+      try {
+        const source = audioContext.createBufferSource();
+        source.buffer = reminderSound;
+        source.connect(audioContext.destination);
+        source.start();
+        console.log('🔔 Reminder sound played');
+      } catch (error) {
+        console.warn('🔔 Failed to play reminder sound:', error);
+      }
+    }
+
+    // 添加到通知列表
+    const notification = {
+      id: `reminder-${todo._id}-${Date.now()}`,
+      todo,
+      timestamp: Date.now()
+    };
+
+    setReminderNotifications(prev => [...prev, notification]);
+
+    // 显示浏览器通知（如果用户允许）
+    if ('Notification' in window && Notification.permission === 'granted') {
+      new Notification(`📋 待办提醒: ${todo.title}`, {
+        body: todo.description?.replace(/提醒:\s*[^,\s]+/, '').trim() || '点击查看详情',
+        icon: '/favicon.ico',
+        tag: todo._id // 防止重复通知
+      });
+    }
+
+    // 显示应用内通知
+    const notificationContent = (
+      <div style={{ maxWidth: '300px' }}>
+        <div style={{ fontWeight: 'bold', marginBottom: '8px' }}>
+          📋 待办提醒
+        </div>
+        <div style={{ marginBottom: '8px' }}>
+          {todo.title}
+        </div>
+        <div style={{ fontSize: '12px', color: '#666', marginBottom: '12px' }}>
+          截止时间: {dayjs(todo.dueDate).format('YYYY-MM-DD HH:mm')}
+        </div>
+        <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
+          <button
+            onClick={() => {
+              // 稍后提醒（5分钟后）
+              const newReminderTime = dayjs().add(5, 'minute').toISOString();
+              const updatedTodos = todos.map(t =>
+                t._id === todo._id
+                  ? { ...t, description: t.description?.replace(/提醒:\s*[^,\s]+/, `提醒: ${newReminderTime}`) }
+                  : t
+              );
+              setTodos(updatedTodos);
+              saveUserTodos(updatedTodos);
+              message.info('已设置5分钟后再次提醒');
+              dismissNotification(notification.id);
+            }}
+            style={{
+              padding: '4px 8px',
+              fontSize: '12px',
+              border: '1px solid #d1d5db',
+              borderRadius: '4px',
+              backgroundColor: 'white',
+              cursor: 'pointer'
+            }}
+          >
+            稍后提醒
+          </button>
+          <button
+            onClick={() => {
+              toggleTodo(todo._id);
+              dismissNotification(notification.id);
+            }}
+            style={{
+              padding: '4px 8px',
+              fontSize: '12px',
+              border: 'none',
+              borderRadius: '4px',
+              backgroundColor: '#10b981',
+              color: 'white',
+              cursor: 'pointer'
+            }}
+          >
+            标记完成
+          </button>
+        </div>
+      </div>
+    );
+
+    message.open({
+      content: notificationContent,
+      duration: 0, // 不自动关闭
+      key: notification.id,
+      style: { marginTop: '60px' }
+    });
+  };
+
+  // 🔔 关闭提醒通知
+  const dismissNotification = (notificationId: string) => {
+    setReminderNotifications(prev =>
+      prev.filter(notification => notification.id !== notificationId)
+    );
+    message.destroy(notificationId);
+  };
+
   // Filter todos based on current view
   const filteredTodos = useMemo(() => {
-    const today = dayjs().startOf('day');
+    const today = currentDate; // 使用实时更新的日期
 
     switch (currentView) {
       case 'my-day':
-        // Tasks specifically created for "my-day" view OR tasks due today
+        // 📅 功能2：我的一天待办栏的日期过滤
+        // 显示所有截止日期为当天的待办事项，无论它们在哪个栏目中创建
         return todos.filter(todo => {
-          if (todo.viewCategory === 'my-day') return true;
-          // Fallback: show tasks due today if no viewCategory is set (for backward compatibility)
-          if (!todo.viewCategory) {
-            const dueDate = dayjs(todo.dueDate).startOf('day');
-            return dueDate.isSame(today, 'day');
+          const dueDate = dayjs(todo.dueDate).startOf('day');
+          const isDueToday = dueDate.isSame(today, 'day');
+
+          if (isDueToday) {
+            console.log(`📅 Including today's task in My Day view: "${todo.title}" (due: ${dueDate.format('YYYY-MM-DD')})`);
           }
-          return false;
+
+          return isDueToday;
         });
 
       case 'important':
-        // Only tasks specifically marked for important view OR starred tasks
+        // ⭐ 功能1：重要待办栏显示所有星标任务
+        // 显示所有已星标的任务，无论它们在哪个原始栏目中创建
         return todos.filter(todo => {
-          if (todo.viewCategory === 'important') return true;
-          // Fallback: show starred tasks if no viewCategory is set (for backward compatibility)
-          if (!todo.viewCategory && todo.isStarred) return true;
-          return false;
+          const isStarred = todo.isStarred === true;
+          if (isStarred) {
+            console.log(`⭐ Including starred task in Important view: "${todo.title}"`);
+          }
+          return isStarred;
         });
 
       case 'planned':
@@ -2313,7 +2584,7 @@ const MainContent: React.FC<MainContentProps> = ({ currentView, onTodosUpdate })
             type="text"
             value={newTaskInput}
             onChange={(e) => setNewTaskInput(e.target.value)}
-            onKeyPress={(e) => e.key === 'Enter' && addTask()}
+            onKeyDown={(e) => e.key === 'Enter' && addTask()}
           />
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginLeft: 'auto', position: 'relative' }}>
             {/* 🔧 为日期按钮创建独立的相对定位容器 */}
