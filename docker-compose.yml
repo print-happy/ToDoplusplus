@@ -1,0 +1,62 @@
+# docker-compose.yml
+version: '3.8'
+
+services:
+  # 1. 后端服务 (backend)
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: todo-backend
+    restart: unless-stopped
+    ports:
+      - "5000:5000"  # 将主机的5000端口映射到容器的5000端口
+    env_file:
+      - ./backend/.env  # 加载环境变量文件
+    volumes:
+      - ./backend:/app  # 将本地 backend 目录挂载到容器的 /app 目录，方便开发时热重载
+      - /app/node_modules # 一个小技巧，防止本地 node_modules 覆盖容器中的
+    depends_on:
+      - mongodb  # 声明依赖 mongodb 服务，会等 mongodb 启动后再启动 backend
+    networks:
+      - app-network
+
+  # 2. 前端服务 (frontend)
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: todo-frontend
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    stdin_open: true  # 保持标准输入打开，React dev server 需要
+    tty: true         # 分配一个伪终端
+    depends_on:
+      - backend
+    networks:
+      - app-network
+
+  # 3. 数据库服务 (mongodb)
+  mongodb:
+    image: mongo:5.0  # 直接使用官方的 MongoDB 5.0 镜像
+    container_name: todo-db
+    restart: unless-stopped
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo-data:/data/db  # 创建一个数据卷来持久化数据库数据
+    networks:
+      - app-network
+
+# 定义网络和数据卷
+networks:
+  app-network:
+    driver: bridge
+
+volumes:
+  mongo-data:
+    driver: local

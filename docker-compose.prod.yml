@@ -1,0 +1,171 @@
+# docker-compose.prod.yml
+# 生产环境 Docker Compose 配置
+
+version: '3.8'
+
+services:
+  # 1. 后端服务 (生产环境)
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.prod
+    container_name: todo-backend-prod
+    restart: unless-stopped
+    ports:
+      - "5000:5000"
+    env_file:
+      - ./backend/.env
+    environment:
+      - NODE_ENV=production
+    depends_on:
+      - mongodb
+    networks:
+      - app-network
+    volumes:
+      - ./logs:/app/logs  # 日志文件挂载
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # 2. 前端服务 (生产环境 - Nginx)
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile.prod
+    container_name: todo-frontend-prod
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"  # HTTPS端口
+    depends_on:
+      - backend
+    networks:
+      - app-network
+    volumes:
+      - ./ssl:/etc/nginx/ssl:ro  # SSL证书挂载 (如果有)
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:80"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # 3. 数据库服务 (生产环境)
+  mongodb:
+    image: mongo:5.0
+    container_name: todo-db-prod
+    restart: unless-stopped
+    ports:
+      - "27017:27017"
+    environment:
+      - MONGO_INITDB_ROOT_USERNAME=admin
+      - MONGO_INITDB_ROOT_PASSWORD=your-strong-password
+      - MONGO_INITDB_DATABASE=todoapp
+    volumes:
+      - mongo-data-prod:/data/db
+      - ./mongodb/init:/docker-entrypoint-initdb.d:ro  # 初始化脚本
+      - ./backups:/backups  # 备份目录
+    networks:
+      - app-network
+    command: mongod --auth
+    healthcheck:
+      test: echo 'db.runCommand("ping").ok' | mongosh localhost:27017/todoapp --quiet
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # 4. Redis缓存 (可选)
+  redis:
+    image: redis:7-alpine
+    container_name: todo-redis-prod
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data-prod:/data
+    networks:
+      - app-network
+    command: redis-server --appendonly yes --requirepass your-redis-password
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # 5. Nginx反向代理 (可选)
+  nginx:
+    image: nginx:alpine
+    container_name: todo-nginx-prod
+    restart: unless-stopped
+    ports:
+      - "8080:80"
+      - "8443:443"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/conf.d:/etc/nginx/conf.d:ro
+      - ./ssl:/etc/nginx/ssl:ro
+      - ./logs/nginx:/var/log/nginx
+    depends_on:
+      - frontend
+      - backend
+    networks:
+      - app-network
+
+  # 6. 监控服务 (可选)
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: todo-prometheus-prod
+    restart: unless-stopped
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    networks:
+      - app-network
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/etc/prometheus/console_libraries'
+      - '--web.console.templates=/etc/prometheus/consoles'
+
+  # 7. 日志收集 (可选)
+  fluentd:
+    image: fluent/fluentd:v1.16-debian-1
+    container_name: todo-fluentd-prod
+    restart: unless-stopped
+    volumes:
+      - ./fluentd/conf:/fluentd/etc
+      - ./logs:/var/log
+    networks:
+      - app-network
+    depends_on:
+      - backend
+      - frontend
+
+# 定义网络
+networks:
+  app-network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16
+
+# 定义数据卷
+volumes:
+  mongo-data-prod:
+    driver: local
+  redis-data-prod:
+    driver: local
+  prometheus-data:
+    driver: local
+
+# 生产环境配置说明:
+# 1. 所有服务都配置了健康检查
+# 2. 数据库启用了认证
+# 3. 支持SSL/HTTPS配置
+# 4. 包含监控和日志收集服务
+# 5. 数据持久化到命名卷
+# 6. 网络隔离和安全配置

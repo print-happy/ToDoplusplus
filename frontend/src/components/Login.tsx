@@ -12,18 +12,49 @@ const Login: React.FC = () => {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+
+    // 🔧 输入验证
     if (!username || !password) {
-      message.error('请输入用户名和密码');
+      message.error('请输入邮箱/用户名和密码');
       return;
     }
 
     setLoading(true);
+    console.log('🔧 Attempting login for:', username);
+
     try {
       await login(username, password);
-      message.success('登录成功');
+      message.success('登录成功！欢迎回来');
+      console.log('✅ Login successful, navigating to todos');
       navigate('/todos');
-    } catch (error) {
-      message.error('登录失败，请检查用户名和密码');
+    } catch (error: any) {
+      // 🔧 详细错误处理：显示具体的错误信息
+      console.error('❌ Login failed:', error);
+
+      const errorMessage = error?.message || '登录失败，请重试';
+
+      // 🔧 根据错误类型显示不同的提示
+      if (errorMessage.includes('账户不存在')) {
+        message.error({
+          content: '账户不存在，请检查邮箱地址或先注册账户',
+          duration: 4,
+        });
+      } else if (errorMessage.includes('密码错误')) {
+        message.error({
+          content: '密码错误，请重新输入',
+          duration: 3,
+        });
+      } else if (errorMessage.includes('网络')) {
+        message.error({
+          content: '网络连接失败，请检查网络后重试',
+          duration: 4,
+        });
+      } else {
+        message.error({
+          content: errorMessage,
+          duration: 4,
+        });
+      }
     } finally {
       setLoading(false);
     }
@@ -81,7 +112,7 @@ const Login: React.FC = () => {
               padding: '20px 16px 12px',
               textAlign: 'center',
               margin: 0
-            }}>Welcome back</h2>
+            }}>欢迎回来</h2>
             <form onSubmit={handleSubmit}>
               <div style={{
                 display: 'flex',
@@ -99,9 +130,9 @@ const Login: React.FC = () => {
                     lineHeight: '1.5',
                     paddingBottom: '8px',
                     margin: 0
-                  }}>Username</p>
+                  }}>邮箱/用户名</p>
                   <input
-                    placeholder="Enter your username"
+                    placeholder="请输入邮箱或用户名"
                     style={{
                       display: 'flex',
                       width: '100%',
@@ -142,10 +173,10 @@ const Login: React.FC = () => {
                     lineHeight: '1.5',
                     paddingBottom: '8px',
                     margin: 0
-                  }}>Password</p>
+                  }}>密码</p>
                   <input
                     type="password"
-                    placeholder="Enter your password"
+                    placeholder="请输入密码"
                     style={{
                       display: 'flex',
                       width: '100%',
@@ -197,7 +228,7 @@ const Login: React.FC = () => {
                   }}
                 >
                   <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                    {loading ? '登录中...' : 'Login'}
+                    {loading ? '登录中...' : '登录'}
                   </span>
                 </button>
               </div>
@@ -223,24 +254,10 @@ const Login: React.FC = () => {
                 onMouseEnter={(e) => e.currentTarget.style.color = '#1284e7'}
                 onMouseLeave={(e) => e.currentTarget.style.color = '#4c759a'}
               >
-                Don't have an account? Register
+                还没有账户？立即注册
               </Link>
             </p>
-            <p style={{
-              color: '#4c759a',
-              fontSize: '14px',
-              fontWeight: 'normal',
-              lineHeight: '1.5',
-              paddingBottom: '12px',
-              paddingTop: '4px',
-              padding: '4px 16px 12px',
-              textAlign: 'center',
-              textDecoration: 'underline',
-              margin: 0,
-              cursor: 'pointer'
-            }}>
-              Forgot password?
-            </p>
+
           </div>
         </div>
       </div>

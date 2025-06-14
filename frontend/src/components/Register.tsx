@@ -9,12 +9,44 @@ const Register: React.FC = () => {
   const navigate = useNavigate();
 
   const onFinish = async (values: { username: string; email: string; password: string }) => {
+    console.log('🔧 Attempting registration for:', values.email);
+
     try {
       await register(values.username, values.email, values.password);
-      message.success('注册成功');
+      message.success({
+        content: '注册成功！欢迎加入TODO++',
+        duration: 3,
+      });
+      console.log('✅ Registration successful, navigating to todos');
       navigate('/todos');
-    } catch (error) {
-      message.error('注册失败，请稍后重试');
+    } catch (error: any) {
+      // 🔧 详细错误处理：显示具体的错误信息
+      console.error('❌ Registration failed:', error);
+
+      const errorMessage = error?.message || '注册失败，请稍后重试';
+
+      // 🔧 根据错误类型显示不同的提示
+      if (errorMessage.includes('已被注册') || errorMessage.includes('已被使用')) {
+        message.error({
+          content: '该邮箱或用户名已被注册，请使用其他信息或直接登录',
+          duration: 4,
+        });
+      } else if (errorMessage.includes('网络')) {
+        message.error({
+          content: '网络连接失败，请检查网络后重试',
+          duration: 4,
+        });
+      } else if (errorMessage.includes('验证')) {
+        message.error({
+          content: '输入信息格式不正确，请检查后重试',
+          duration: 4,
+        });
+      } else {
+        message.error({
+          content: errorMessage,
+          duration: 4,
+        });
+      }
     }
   };
 

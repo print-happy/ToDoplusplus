@@ -4,7 +4,9 @@ import axios from 'axios';
 import dayjs from 'dayjs';
 import { useAuth } from '../contexts/AuthContext';
 import Settings from './Settings';
-import { getApiKeyWithPrompt, sanitizeApiKeyForLogging } from '../utils/apiKeyManager';
+import { getApiKeyWithPrompt, sanitizeApiKeyForLogging, getAllUserApiKeys, clearAllApiKeys, testApiKeyIsolation, getApiKeyAccessLogs, clearApiKeyAccessLogs } from '../utils/apiKeyManager';
+import { emergencyCompleteCleanup, secureUserSwitchCleanup, performSecurityCheck, autoFixDataIsolation } from '../utils/emergencyCleanup';
+import { getAiApiKey, getApiKeyStatus, getSecureApiKeyInfo, hasPersonalApiKey, testApiKeyConnection, getAvailableAiModels, getUserSelectedModel, canUserModifyModel } from '../utils/aiApiKeyManager';
 
 interface Todo {
   _id: string;
@@ -18,6 +20,7 @@ interface Todo {
   isAIGenerated?: boolean;
   isStarred?: boolean;
   category?: string; // For custom lists
+  viewCategory?: string; // For category-specific tasks
   createdAt?: string;
   updatedAt?: string;
 }
@@ -32,16 +35,27 @@ const MainContent: React.FC<MainContentProps> = ({ currentView, onTodosUpdate })
   const [loading, setLoading] = useState(true);
   const [newTaskInput, setNewTaskInput] = useState('');
   const [aiLoading, setAiLoading] = useState(false);
+  const [showAiGeneratingToast, setShowAiGeneratingToast] = useState(false);
   const [selectedDate, setSelectedDate] = useState<string>('');
   const [showDatePicker, setShowDatePicker] = useState(false);
   const [reminderTime, setReminderTime] = useState<string>('');
   const [showReminderPicker, setShowReminderPicker] = useState(false);
+
+  // 🔔 功能3：待办提醒通知系统
+  const [reminderNotifications, setReminderNotifications] = useState<{
+    id: string;
+    todo: Todo;
+    timestamp: number;
+  }[]>([]);
+  const [audioContext, setAudioContext] = useState<AudioContext | null>(null);
+  const [reminderSound, setReminderSound] = useState<AudioBuffer | null>(null);
   const [showSettings, setShowSettings] = useState(false);
   const [showCustomDatePicker, setShowCustomDatePicker] = useState(false);
   const [customDate, setCustomDate] = useState('');
   const [showCompletedSection, setShowCompletedSection] = useState(false);
   const [showMoreOptions, setShowMoreOptions] = useState(false);
   const [selectedTaskForDeletion, setSelectedTaskForDeletion] = useState<string | null>(null);
+  const [deleteMode, setDeleteMode] = useState(false);
   const { user, token } = useAuth();
 
   const datePickerRef = useRef<HTMLDivElement>(null);
@@ -50,71 +64,211 @@ const MainContent: React.FC<MainContentProps> = ({ currentView, onTodosUpdate })
 
   const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:5000/api';
 
-  const initializeTodos = useCallback(() => {
-    setLoading(true);
+  // 获取用户专属的localStorage键
+  const getUserTodosKey = useCallback(() => {
+    const userId = user?._id || user?.email || 'anonymous';
+    return `todos_${userId}`;
+  }, [user]);
+
+  // 获取用户专属的todos数据
+  const getUserTodos = useCallback(() => {
     try {
-      // 首先尝试从localStorage获取数据
-      const savedTodos = localStorage.getItem('todos');
+      const userTodosKey = getUserTodosKey();
+      const savedTodos = localStorage.getItem(userTodosKey);
+      console.log(`🔍 Loading todos for user ${user?.email || 'anonymous'} with key: ${userTodosKey}`);
       console.log('Raw localStorage data:', savedTodos);
 
       if (savedTodos) {
         const parsedTodos = JSON.parse(savedTodos);
-        setTodos(parsedTodos);
-        console.log('✅ Loaded todos from localStorage:', parsedTodos);
-        console.log('Number of todos loaded:', parsedTodos.length);
+        // 额外验证：确保所有todos都属于当前用户
+        const userFilteredTodos = parsedTodos.filter((todo: Todo) =>
+          todo.user === user?._id || todo.user === user?.email || !todo.user
+        );
+        console.log('✅ Loaded user-specific todos:', userFilteredTodos);
+        return userFilteredTodos;
+      }
+      return [];
+    } catch (error) {
+      console.error('❌ Error loading user todos:', error);
+      return [];
+    }
+  }, [user, getUserTodosKey]);
+
+  // 保存用户专属的todos数据
+  const saveUserTodos = useCallback((todosToSave: Todo[]) => {
+    try {
+      const userTodosKey = getUserTodosKey();
+      // 确保所有todos都标记为当前用户的
+      const userTodos = todosToSave.map(todo => ({
+        ...todo,
+        user: user?._id || user?.email || ''
+      }));
+      localStorage.setItem(userTodosKey, JSON.stringify(userTodos));
+      console.log(`💾 Saved ${userTodos.length} todos for user ${user?.email || 'anonymous'}`);
+    } catch (error) {
+      console.error('❌ Error saving user todos:', error);
+    }
+  }, [user, getUserTodosKey]);
+
+  // 🔧 用户数据隔离验证和清理
+  const validateUserDataIsolation = useCallback(() => {
+    try {
+      console.log('🔧 SECURITY: Starting user data isolation validation');
+
+      const currentUserId = user?._id || user?.email;
+      if (!currentUserId) {
+        console.log('⏳ No current user, skipping validation');
+        return;
+      }
+
+      // 1. 清理旧的共享数据
+      const legacyTodos = localStorage.getItem('todos');
+      if (legacyTodos) {
+        console.log('🧹 Removing legacy shared todos data');
+        localStorage.removeItem('todos');
+      }
+
+      // 2. 验证registeredUsers数据完整性
+      const registeredUsers = JSON.parse(localStorage.getItem('registeredUsers') || '[]');
+      console.log(`🔍 Found ${registeredUsers.length} registered users`);
+
+      // 3. 验证当前用户在注册列表中
+      const currentUserRecord = registeredUsers.find((u: any) =>
+        u.id === currentUserId || u.email === user?.email
+      );
+
+      if (!currentUserRecord) {
+        console.warn('⚠️ Current user not found in registered users list');
       } else {
-        // 如果没有保存的数据，使用初始模拟数据
-        const mockTodos = [
-          {
-            _id: '1',
-            user: user?._id || '',
-            title: 'Finish TODO++',
-            description: '完成TODO++项目的开发',
-            dueDate: new Date().toISOString(),
-            status: 'pending' as const,
-            priority: 'high' as const,
-            isAIGenerated: false,
-            isStarred: true,
-          },
-          {
-            _id: '2',
-            user: user?._id || '',
-            title: '阅读源码@vitejs/plugin-react',
-            description: '学习React插件的实现',
-            dueDate: new Date(Date.now() + 86400000).toISOString(),
-            status: 'pending' as const,
-            priority: 'medium' as const,
-            isAIGenerated: true,
-            isStarred: false,
-          },
-          {
-            _id: '3',
-            user: user?._id || '',
-            title: '给学弟讲需求分析和设计稿',
-            description: '分享项目经验',
-            dueDate: new Date(Date.now() + 172800000).toISOString(),
-            status: 'completed' as const,
-            priority: 'low' as const,
-            isAIGenerated: false,
-            isStarred: false,
-          },
-        ];
-        setTodos(mockTodos);
-        localStorage.setItem('todos', JSON.stringify(mockTodos));
-        console.log('🆕 Initialized with mock todos:', mockTodos);
+        console.log('✅ Current user found in registered users list:', currentUserRecord.email);
+      }
+
+      // 4. 验证用户数据键的一致性
+      const currentUserTodosKey = `todos_${currentUserId}`;
+      const currentUserApiKeyKey = `siliconflow_api_key_${currentUserId}`;
+
+      console.log('🔍 Current user data keys:');
+      console.log('  - Todos key:', currentUserTodosKey);
+      console.log('  - API key:', currentUserApiKeyKey);
+
+      // 5. 检查是否存在数据污染
+      const allTodoKeys = Object.keys(localStorage).filter(key => key.startsWith('todos_'));
+      let contaminationFound = false;
+
+      allTodoKeys.forEach(key => {
+        if (key !== currentUserTodosKey) {
+          try {
+            const otherUserTodos = JSON.parse(localStorage.getItem(key) || '[]');
+            const contaminatedTodos = otherUserTodos.filter((todo: Todo) =>
+              todo.user === currentUserId
+            );
+
+            if (contaminatedTodos.length > 0) {
+              console.warn(`🚨 SECURITY: Found ${contaminatedTodos.length} contaminated todos in ${key}`);
+              contaminationFound = true;
+
+              // 移除被污染的数据
+              const cleanedTodos = otherUserTodos.filter((todo: Todo) =>
+                todo.user !== currentUserId
+              );
+              localStorage.setItem(key, JSON.stringify(cleanedTodos));
+              console.log(`🔧 Cleaned contaminated data from ${key}`);
+            }
+          } catch (error) {
+            console.error(`Error validating ${key}:`, error);
+          }
+        }
+      });
+
+      if (!contaminationFound) {
+        console.log('✅ No data contamination found - user isolation is secure');
+      }
+
+      console.log('✅ User data isolation validation completed');
+    } catch (error) {
+      console.error('❌ Error during user data isolation validation:', error);
+    }
+  }, [user]);
+
+  const initializeTodos = useCallback(() => {
+    if (!user) {
+      console.log('⏳ No user logged in, skipping todo initialization');
+      setTodos([]); // 🔒 确保无用户时清空todos
+      setLoading(false);
+      return;
+    }
+
+    setLoading(true);
+    console.log(`🔧 Initializing todos for user: ${user.email || user.username || user._id}`);
+    console.log('🔧 User details:', { id: user._id, email: user.email, username: user.username });
+
+    try {
+      // 🚨 安全修复：强制清空当前todos，防止显示其他用户数据
+      setTodos([]);
+
+      // 🔧 获取当前用户的todos
+      const userTodos = getUserTodos();
+      console.log(`🔧 Retrieved ${userTodos.length} todos from storage for user`);
+
+      if (userTodos.length > 0) {
+        // 🔒 严格安全验证：确保所有todos都属于当前用户
+        const verifiedTodos = userTodos.filter((todo: Todo) => {
+          // 🔧 多重验证：检查用户ID、邮箱匹配
+          const belongsToUser = todo.user === user._id ||
+                               todo.user === user.email ||
+                               todo.user === user.username ||
+                               !todo.user; // 允许没有user字段的旧数据，但会在保存时修复
+
+          if (!belongsToUser) {
+            console.warn(`🚨 SECURITY: Found todo that doesn't belong to current user:`, {
+              todoId: todo._id,
+              todoUser: todo.user,
+              currentUser: user._id,
+              currentEmail: user.email
+            });
+          }
+
+          return belongsToUser;
+        });
+
+        // 🔧 为没有user字段的todos添加当前用户标识
+        const fixedTodos = verifiedTodos.map((todo: Todo) => ({
+          ...todo,
+          user: todo.user || user._id || user.email
+        }));
+
+        setTodos(fixedTodos);
+        console.log(`✅ Loaded ${fixedTodos.length} verified todos for user (filtered from ${userTodos.length})`);
+
+        // 🔧 如果发现数据问题或进行了修复，重新保存清理后的数据
+        if (fixedTodos.length !== userTodos.length ||
+            fixedTodos.some((todo: Todo, index: number) => todo.user !== userTodos[index]?.user)) {
+          console.log('🔒 Cleaning up and fixing user data');
+          saveUserTodos(fixedTodos);
+        }
+      } else {
+        // 🔧 新用户或无数据：创建空的todos列表
+        console.log('🆕 New user or no existing data, starting with empty todo list');
+        setTodos([]);
+        saveUserTodos([]);
       }
     } catch (error) {
       message.error('初始化待办事项失败');
       console.error('❌ Initialize todos error:', error);
+      setTodos([]); // 🔒 出错时确保清空todos
     }
     setLoading(false);
-  }, [user]);
+  }, [user, getUserTodos, saveUserTodos]);
 
   // 尝试从后端同步数据（可选）
   const syncWithBackend = useCallback(async () => {
-    if (!token) return;
+    if (!token || !user) {
+      console.log('⏳ No token or user, skipping backend sync');
+      return;
+    }
 
     try {
+      console.log(`🔄 Syncing todos with backend for user: ${user.email || user.username}`);
       const response = await axios.get(`${API_URL}/todos`, {
         headers: { Authorization: `Bearer ${token}` },
       });
@@ -123,21 +277,30 @@ const MainContent: React.FC<MainContentProps> = ({ currentView, onTodosUpdate })
         const backendTodos = response.data.sort((a: Todo, b: Todo) =>
           new Date(a.dueDate).getTime() - new Date(b.dueDate).getTime()
         );
-        setTodos(backendTodos);
-        localStorage.setItem('todos', JSON.stringify(backendTodos));
-        console.log('Synced with backend:', backendTodos);
+
+        // 验证后端返回的todos都属于当前用户
+        const userBackendTodos = backendTodos.filter((todo: Todo) =>
+          todo.user === user._id || todo.user === user.email
+        );
+
+        setTodos(userBackendTodos);
+        saveUserTodos(userBackendTodos);
+        console.log(`✅ Synced ${userBackendTodos.length} todos from backend for user`);
       }
     } catch (error) {
       console.log('Backend sync failed, using local data:', error);
       // 不显示错误消息，因为本地数据已经可用
     }
-  }, [token, API_URL]);
+  }, [token, user, API_URL, saveUserTodos]);
 
   useEffect(() => {
+    // 🔧 用户变化时验证数据隔离并初始化
+    validateUserDataIsolation();
+    // 然后初始化用户专属数据
     initializeTodos();
     // 可选：尝试与后端同步（不阻塞本地功能）
     syncWithBackend();
-  }, [initializeTodos, syncWithBackend]);
+  }, [validateUserDataIsolation, initializeTodos, syncWithBackend]);
 
   // Notify parent component when todos change
   useEffect(() => {
@@ -166,6 +329,759 @@ const MainContent: React.FC<MainContentProps> = ({ currentView, onTodosUpdate })
     };
   }, []);
 
+  // 开发者工具：数据隔离测试
+  useEffect(() => {
+    if (process.env.NODE_ENV === 'development') {
+      (window as any).todoDebug = {
+        getCurrentUserTodos: () => {
+          const userTodosKey = getUserTodosKey();
+          const todos = localStorage.getItem(userTodosKey);
+          console.log(`Current user (${user?.email || 'anonymous'}) todos:`, todos ? JSON.parse(todos) : []);
+          return todos ? JSON.parse(todos) : [];
+        },
+        getAllUserTodos: () => {
+          const allKeys = Object.keys(localStorage).filter(key => key.startsWith('todos_'));
+          const allUserTodos = {};
+          allKeys.forEach(key => {
+            const userId = key.replace('todos_', '');
+            const todos = localStorage.getItem(key);
+            (allUserTodos as any)[userId] = todos ? JSON.parse(todos) : [];
+          });
+          console.log('All user todos:', allUserTodos);
+          return allUserTodos;
+        },
+        clearCurrentUserTodos: () => {
+          const userTodosKey = getUserTodosKey();
+          localStorage.removeItem(userTodosKey);
+          setTodos([]);
+          console.log(`Cleared todos for user: ${user?.email || 'anonymous'}`);
+        },
+        testDataIsolation: () => {
+          console.log('🧪 Testing data isolation...');
+          const allUserTodos = (window as any).todoDebug.getAllUserTodos();
+          const currentUserTodos = (window as any).todoDebug.getCurrentUserTodos();
+          const allUserApiKeys = getAllUserApiKeys();
+          console.log('✅ Data isolation test completed. Check console for details.');
+          return { allUserTodos, currentUserTodos, allUserApiKeys };
+        },
+        getAllUserApiKeys: () => {
+          const apiKeys = getAllUserApiKeys();
+          console.log('All user API keys:', apiKeys);
+          return apiKeys;
+        },
+        clearAllApiKeys: () => {
+          clearAllApiKeys();
+          console.log('All API keys cleared');
+        },
+        testApiKeyIsolation: () => {
+          console.log('🔐 Testing API key isolation...');
+          const isolationResult = testApiKeyIsolation();
+          console.log('✅ API key isolation test completed.');
+          return isolationResult;
+        },
+        emergencySecurityCheck: () => {
+          console.log('🚨 Emergency Security Check...');
+          const isolationResult = testApiKeyIsolation();
+          const dataResult = (window as any).todoDebug.testDataIsolation();
+
+          const securityReport = {
+            timestamp: new Date().toISOString(),
+            apiKeySecurity: isolationResult,
+            dataSecurity: dataResult,
+            overallStatus: isolationResult.securityStatus.includes('BREACH') ? '🚨 SECURITY BREACH DETECTED' : '✅ SECURE'
+          };
+
+          console.log('🔒 Emergency Security Report:', securityReport);
+
+          if (securityReport.overallStatus.includes('BREACH')) {
+            console.error('🚨 CRITICAL: Security breach detected! Immediate action required!');
+          }
+
+          return securityReport;
+        },
+        getApiKeyAccessLogs: () => {
+          const logs = getApiKeyAccessLogs();
+          console.log('🔒 API Key Access Logs:', logs);
+          return logs;
+        },
+        clearApiKeyAccessLogs: () => {
+          clearApiKeyAccessLogs();
+          console.log('🧹 API key access logs cleared');
+        },
+        securityAudit: () => {
+          console.log('🔍 Comprehensive Security Audit...');
+
+          const currentUser = user?.email || user?.username || 'anonymous';
+          const isolationResult = testApiKeyIsolation();
+          const dataResult = (window as any).todoDebug.testDataIsolation();
+          const accessLogs = getApiKeyAccessLogs();
+
+          // 分析访问日志中的安全问题
+          const securityIssues = accessLogs.filter(log => !log.success || log.securityNote?.includes('BREACH'));
+
+          const auditReport = {
+            timestamp: new Date().toISOString(),
+            currentUser,
+            apiKeySecurity: isolationResult,
+            dataSecurity: dataResult,
+            accessLogs: {
+              total: accessLogs.length,
+              recent: accessLogs.slice(-10),
+              securityIssues: securityIssues.length,
+              issues: securityIssues
+            },
+            overallSecurityStatus:
+              isolationResult.securityStatus.includes('BREACH') || securityIssues.length > 0
+                ? '🚨 SECURITY ISSUES DETECTED'
+                : '✅ SECURE',
+            recommendations: [] as string[]
+          };
+
+          // 生成安全建议
+          if (securityIssues.length > 0) {
+            auditReport.recommendations.push('Review and address security issues in access logs');
+          }
+          if (isolationResult.securityStatus.includes('BREACH')) {
+            auditReport.recommendations.push('Critical: Fix API key isolation breach immediately');
+          }
+          if (accessLogs.length === 0) {
+            auditReport.recommendations.push('Enable API key access logging for better security monitoring');
+          }
+
+          console.log('🔒 Security Audit Report:', auditReport);
+
+          if (auditReport.overallSecurityStatus.includes('ISSUES')) {
+            console.error('🚨 SECURITY ALERT: Issues detected in security audit!');
+          }
+
+          return auditReport;
+        },
+        // 🚨 紧急安全修复工具
+        emergencyCompleteCleanup: () => {
+          console.log('🚨 EMERGENCY: Initiating complete cleanup');
+          emergencyCompleteCleanup();
+        },
+        secureUserSwitchCleanup: (newUserId?: string) => {
+          console.log('🔒 SECURITY: Initiating secure user switch cleanup');
+          secureUserSwitchCleanup(newUserId);
+        },
+        performSecurityCheck: () => {
+          const currentUserId = user?.email || user?.username || user?._id;
+          if (!currentUserId) {
+            console.warn('⚠️ No current user for security check');
+            return { isSecure: false, issues: ['No current user'], recommendations: ['Login required'] };
+          }
+          return performSecurityCheck(currentUserId);
+        },
+        autoFixDataIsolation: () => {
+          const currentUserId = user?.email || user?.username || user?._id;
+          if (!currentUserId) {
+            console.warn('⚠️ No current user for auto-fix');
+            return false;
+          }
+          return autoFixDataIsolation(currentUserId);
+        },
+        // 🚨 终极安全验证
+        ultimateSecurityTest: () => {
+          console.log('🚨 ULTIMATE SECURITY TEST: Starting comprehensive security verification');
+
+          const currentUserId = user?.email || user?.username || user?._id;
+          if (!currentUserId) {
+            console.error('🚨 CRITICAL: No user logged in for security test');
+            return { status: 'CRITICAL_ERROR', message: 'No user logged in' };
+          }
+
+          // 1. 执行安全检查
+          const securityCheck = performSecurityCheck(currentUserId);
+
+          // 2. 执行数据隔离测试
+          const isolationTest = testApiKeyIsolation();
+
+          // 3. 执行数据完整性测试
+          const dataTest = (window as any).todoDebug.testDataIsolation();
+
+          // 4. 检查访问日志
+          const accessLogs = getApiKeyAccessLogs();
+          const securityIssues = accessLogs.filter(log => !log.success || log.securityNote?.includes('BREACH'));
+
+          const ultimateResult = {
+            timestamp: new Date().toISOString(),
+            currentUser: currentUserId,
+            securityCheck,
+            isolationTest,
+            dataTest,
+            accessLogs: {
+              total: accessLogs.length,
+              securityIssues: securityIssues.length,
+              issues: securityIssues
+            },
+            overallStatus:
+              !securityCheck.isSecure ||
+              isolationTest.securityStatus.includes('BREACH') ||
+              securityIssues.length > 0
+                ? '🚨 SECURITY BREACH DETECTED'
+                : '✅ SECURE',
+            criticalIssues: [
+              ...securityCheck.issues,
+              ...(isolationTest.securityStatus.includes('BREACH') ? ['API key isolation breach'] : []),
+              ...(securityIssues.length > 0 ? [`${securityIssues.length} access security issues`] : [])
+            ]
+          };
+
+          console.log('🔒 ULTIMATE SECURITY TEST RESULTS:', ultimateResult);
+
+          if (ultimateResult.overallStatus.includes('BREACH')) {
+            console.error('🚨 CRITICAL SECURITY ALERT: Multiple security breaches detected!');
+            console.error('🚨 IMMEDIATE ACTION REQUIRED: Consider emergency cleanup');
+          }
+
+          return ultimateResult;
+        },
+        // 🔧 用户认证调试工具
+        testUserAuthentication: () => {
+          console.log('🔧 Testing user authentication system');
+
+          const currentUser = user;
+          const registeredUsers = JSON.parse(localStorage.getItem('registeredUsers') || '[]');
+          const currentToken = localStorage.getItem('token');
+          const currentUserData = localStorage.getItem('user');
+
+          const authTest = {
+            timestamp: new Date().toISOString(),
+            currentUser: {
+              exists: !!currentUser,
+              id: currentUser?._id,
+              email: currentUser?.email,
+              username: currentUser?.username,
+            },
+            registeredUsers: {
+              total: registeredUsers.length,
+              users: registeredUsers.map((u: any) => ({
+                id: u.id,
+                email: u.email,
+                username: u.username,
+                registeredAt: u.registeredAt,
+                lastLogin: u.lastLogin,
+              })),
+            },
+            session: {
+              hasToken: !!currentToken,
+              hasUserData: !!currentUserData,
+              tokenValid: currentToken && currentToken.startsWith('token-'),
+            },
+            dataIsolation: {
+              userTodosKey: currentUser ? `todos_${currentUser._id || currentUser.email}` : null,
+              userApiKeyKey: currentUser ? `siliconflow_api_key_${currentUser._id || currentUser.email}` : null,
+            },
+          };
+
+          console.log('🔧 User Authentication Test Results:', authTest);
+          return authTest;
+        },
+        getUserRegistrationData: () => {
+          const registeredUsers = JSON.parse(localStorage.getItem('registeredUsers') || '[]');
+          console.log('📋 Registered Users:', registeredUsers);
+          return registeredUsers;
+        },
+        simulateLoginTest: (email: string, password: string) => {
+          console.log('🧪 Simulating login test for:', email);
+
+          const registeredUsers = JSON.parse(localStorage.getItem('registeredUsers') || '[]');
+          const foundUser = registeredUsers.find((u: any) => u.email === email || u.username === email);
+
+          const loginTest = {
+            email,
+            userExists: !!foundUser,
+            passwordMatch: foundUser ? foundUser.password === password : false,
+            userDetails: foundUser ? {
+              id: foundUser.id,
+              username: foundUser.username,
+              email: foundUser.email,
+              registeredAt: foundUser.registeredAt,
+            } : null,
+            expectedResult: foundUser && foundUser.password === password ? 'SUCCESS' :
+                           !foundUser ? 'USER_NOT_FOUND' : 'WRONG_PASSWORD',
+          };
+
+          console.log('🧪 Login Test Results:', loginTest);
+          return loginTest;
+        },
+        clearUserData: () => {
+          console.log('🧹 Clearing all user data for testing');
+          localStorage.removeItem('registeredUsers');
+          localStorage.removeItem('user');
+          localStorage.removeItem('token');
+          console.log('✅ User data cleared');
+        },
+        // 🔧 用户数据隔离专用调试工具
+        validateUserIsolation: () => {
+          console.log('🔧 Validating user data isolation...');
+          validateUserDataIsolation();
+        },
+        getUserDataSummary: () => {
+          const currentUserId = user?._id || user?.email;
+          const registeredUsers = JSON.parse(localStorage.getItem('registeredUsers') || '[]');
+
+          // 获取所有用户的数据键
+          const allKeys = Object.keys(localStorage);
+          const todoKeys = allKeys.filter(key => key.startsWith('todos_'));
+          const apiKeyKeys = allKeys.filter(key => key.startsWith('siliconflow_api_key_'));
+
+          const summary = {
+            currentUser: {
+              id: currentUserId,
+              email: user?.email,
+              username: user?.username,
+            },
+            registeredUsers: {
+              total: registeredUsers.length,
+              users: registeredUsers.map((u: any) => ({
+                id: u.id,
+                email: u.email,
+                username: u.username,
+                registeredAt: u.registeredAt,
+                lastLogin: u.lastLogin,
+              })),
+            },
+            dataKeys: {
+              todoKeys: todoKeys.map(key => ({
+                key,
+                hasData: !!localStorage.getItem(key),
+                dataLength: localStorage.getItem(key) ? JSON.parse(localStorage.getItem(key) || '[]').length : 0,
+              })),
+              apiKeyKeys: apiKeyKeys.map(key => ({
+                key,
+                hasData: !!localStorage.getItem(key),
+              })),
+            },
+            isolation: {
+              currentUserTodosKey: currentUserId ? `todos_${currentUserId}` : null,
+              currentUserApiKeyKey: currentUserId ? `siliconflow_api_key_${currentUserId}` : null,
+            },
+          };
+
+          console.log('📊 User Data Summary:', summary);
+          return summary;
+        },
+        testMultiUserScenario: () => {
+          console.log('🧪 Testing multi-user scenario...');
+
+          const registeredUsers = JSON.parse(localStorage.getItem('registeredUsers') || '[]');
+          const currentUserId = user?._id || user?.email;
+
+          console.log(`Current user: ${currentUserId}`);
+          console.log(`Total registered users: ${registeredUsers.length}`);
+
+          // 检查每个用户的数据隔离
+          registeredUsers.forEach((regUser: any) => {
+            const userTodosKey = `todos_${regUser.id}`;
+            const userApiKeyKey = `siliconflow_api_key_${regUser.id}`;
+
+            const userTodos = localStorage.getItem(userTodosKey);
+            const userApiKey = localStorage.getItem(userApiKeyKey);
+
+            console.log(`User ${regUser.email}:`);
+            console.log(`  - Todos: ${userTodos ? JSON.parse(userTodos).length : 0} items`);
+            console.log(`  - API Key: ${userApiKey ? 'configured' : 'not configured'}`);
+
+            // 检查数据归属
+            if (userTodos) {
+              const todos = JSON.parse(userTodos);
+              const wrongOwnership = todos.filter((todo: Todo) =>
+                todo.user && todo.user !== regUser.id && todo.user !== regUser.email
+              );
+
+              if (wrongOwnership.length > 0) {
+                console.warn(`  ⚠️ Found ${wrongOwnership.length} todos with wrong ownership`);
+              } else {
+                console.log(`  ✅ All todos correctly owned`);
+              }
+            }
+          });
+
+          return {
+            currentUser: currentUserId,
+            totalUsers: registeredUsers.length,
+            isolationStatus: 'TESTED',
+          };
+        },
+        emergencyUserDataRepair: () => {
+          console.log('🚨 EMERGENCY: Starting user data repair...');
+
+          const registeredUsers = JSON.parse(localStorage.getItem('registeredUsers') || '[]');
+          let repairCount = 0;
+
+          // 修复每个用户的数据归属
+          registeredUsers.forEach((regUser: any) => {
+            const userTodosKey = `todos_${regUser.id}`;
+            const userTodos = localStorage.getItem(userTodosKey);
+
+            if (userTodos) {
+              const todos = JSON.parse(userTodos);
+              const repairedTodos = todos.map((todo: Todo) => ({
+                ...todo,
+                user: todo.user || regUser.id,
+              }));
+
+              localStorage.setItem(userTodosKey, JSON.stringify(repairedTodos));
+              repairCount++;
+            }
+          });
+
+          console.log(`🔧 Repaired data for ${repairCount} users`);
+
+          // 重新验证隔离
+          validateUserDataIsolation();
+
+          return { repairedUsers: repairCount };
+        },
+        // 🔑 双重API密钥机制调试工具
+        testDualApiKeyMechanism: () => {
+          console.log('🔑 Testing dual API key mechanism...');
+
+          const personalKeyStatus = hasPersonalApiKey();
+          const apiKeyResult = getAiApiKey();
+          const keyStatus = getApiKeyStatus();
+          const secureInfo = getSecureApiKeyInfo();
+
+          const dualKeyTest = {
+            timestamp: new Date().toISOString(),
+            personalKeyConfigured: personalKeyStatus,
+            apiKeyResult: apiKeyResult ? {
+              keyType: apiKeyResult.keyType,
+              keySource: apiKeyResult.keySource,
+              isValid: apiKeyResult.isValid,
+            } : null,
+            keyStatus: keyStatus,
+            secureInfo: secureInfo,
+            mechanism: {
+              priority: 'personal > platform',
+              fallback: 'platform key when personal not available',
+              security: 'actual keys never exposed in logs',
+            },
+          };
+
+          console.log('🔑 Dual API Key Test Results:', dualKeyTest);
+          return dualKeyTest;
+        },
+        testApiKeyConnection: async (keyType: 'auto' | 'personal' | 'platform' = 'auto') => {
+          console.log(`🔑 Testing API key connection (${keyType})...`);
+          const result = await testApiKeyConnection(keyType);
+          console.log('🔑 Connection Test Results:', result);
+          return result;
+        },
+        getApiKeyStatus: () => {
+          const status = getApiKeyStatus();
+          console.log('🔑 Current API Key Status:', status);
+          return status;
+        },
+        simulateApiKeyScenarios: () => {
+          console.log('🔑 Simulating different API key scenarios...');
+
+          const scenarios = [
+            {
+              name: 'User with personal key',
+              hasPersonal: hasPersonalApiKey(),
+              expectedKeyType: hasPersonalApiKey() ? 'personal' : 'platform',
+            },
+            {
+              name: 'User without personal key',
+              hasPersonal: false,
+              expectedKeyType: 'platform',
+            },
+          ];
+
+          scenarios.forEach(scenario => {
+            console.log(`📋 Scenario: ${scenario.name}`);
+            console.log(`  - Has personal key: ${scenario.hasPersonal}`);
+            console.log(`  - Expected key type: ${scenario.expectedKeyType}`);
+          });
+
+          const currentResult = getAiApiKey();
+          console.log('🔑 Current actual result:', currentResult ? {
+            keyType: currentResult.keyType,
+            keySource: currentResult.keySource,
+          } : 'No key available');
+
+          return scenarios;
+        },
+        // 🤖 AI模型选择调试工具
+        testAiModelSelection: () => {
+          console.log('🤖 Testing AI model selection mechanism...');
+
+          const hasPersonal = hasPersonalApiKey();
+          const canModify = canUserModifyModel();
+          const userModel = getUserSelectedModel();
+          const availableModels = getAvailableAiModels();
+          const apiKeyResult = getAiApiKey();
+          const keyStatus = getApiKeyStatus();
+
+          const modelTest = {
+            timestamp: new Date().toISOString(),
+            personalKeyConfigured: hasPersonal,
+            canModifyModel: canModify,
+            userSelectedModel: userModel,
+            availableModels: availableModels,
+            currentApiKeyResult: apiKeyResult ? {
+              keyType: apiKeyResult.keyType,
+              model: apiKeyResult.model,
+              modelSource: apiKeyResult.modelSource,
+            } : null,
+            keyStatus: {
+              currentKeyType: keyStatus.currentKeyType,
+              modelInfo: keyStatus.modelInfo,
+            },
+            modelSelectionLogic: {
+              personalKey: hasPersonal ? `User can select from ${availableModels.length} models` : 'Not applicable',
+              platformKey: !hasPersonal ? 'Locked to deepseek-ai/DeepSeek-R1-0528-Qwen3-8B' : 'Not applicable',
+            },
+          };
+
+          console.log('🤖 AI Model Selection Test Results:', modelTest);
+          return modelTest;
+        },
+        getAiModelInfo: () => {
+          const info = {
+            userSelectedModel: getUserSelectedModel(),
+            canUserModify: canUserModifyModel(),
+            availableModels: getAvailableAiModels(),
+            currentStatus: getApiKeyStatus().modelInfo,
+          };
+
+          console.log('🤖 AI Model Information:', info);
+          return info;
+        },
+        simulateModelScenarios: () => {
+          console.log('🤖 Simulating different AI model scenarios...');
+
+          const scenarios = [
+            {
+              name: 'Personal key user with custom model',
+              hasPersonalKey: true,
+              expectedCanModify: true,
+              expectedModelSource: 'user_choice',
+            },
+            {
+              name: 'Personal key user with default model',
+              hasPersonalKey: true,
+              expectedCanModify: true,
+              expectedModelSource: 'default',
+            },
+            {
+              name: 'Platform key user',
+              hasPersonalKey: false,
+              expectedCanModify: false,
+              expectedModelSource: 'platform_locked',
+            },
+          ];
+
+          const currentHasPersonal = hasPersonalApiKey();
+          const currentCanModify = canUserModifyModel();
+          const currentApiResult = getAiApiKey();
+
+          scenarios.forEach(scenario => {
+            console.log(`📋 Scenario: ${scenario.name}`);
+            console.log(`  - Has personal key: ${scenario.hasPersonalKey}`);
+            console.log(`  - Expected can modify: ${scenario.expectedCanModify}`);
+            console.log(`  - Expected model source: ${scenario.expectedModelSource}`);
+          });
+
+          console.log('🤖 Current actual state:');
+          console.log(`  - Has personal key: ${currentHasPersonal}`);
+          console.log(`  - Can modify model: ${currentCanModify}`);
+          console.log(`  - Current model: ${currentApiResult?.model || 'N/A'}`);
+          console.log(`  - Model source: ${currentApiResult?.modelSource || 'N/A'}`);
+
+          return {
+            scenarios,
+            currentState: {
+              hasPersonalKey: currentHasPersonal,
+              canModify: currentCanModify,
+              model: currentApiResult?.model,
+              modelSource: currentApiResult?.modelSource,
+            },
+          };
+        },
+        // 🚨 紧急数据隔离安全检查
+        emergencyDataIsolationCheck: () => {
+          console.log('🚨 EMERGENCY: Starting comprehensive data isolation security check');
+
+          const currentUserId = user?._id || user?.email;
+          if (!currentUserId) {
+            console.warn('⚠️ No current user for security check');
+            return { status: 'NO_USER', issues: ['No current user logged in'] };
+          }
+
+          const issues: string[] = [];
+          const warnings: string[] = [];
+
+          // 1. 检查是否存在全局todos数据
+          const globalTodos = localStorage.getItem('todos');
+          if (globalTodos) {
+            issues.push('🚨 CRITICAL: Global todos data found - immediate security risk');
+            console.error('🚨 CRITICAL SECURITY ISSUE: Global todos data detected');
+          }
+
+          // 2. 检查当前用户的数据完整性
+          const currentUserKey = `todos_${currentUserId}`;
+          const currentUserTodos = localStorage.getItem(currentUserKey);
+          console.log(`🔍 Current user (${currentUserId}) todos key: ${currentUserKey}`);
+
+          // 3. 检查所有用户数据键
+          const allTodoKeys = Object.keys(localStorage).filter(key => key.startsWith('todos_'));
+          console.log(`🔍 Found ${allTodoKeys.length} user todo keys:`, allTodoKeys);
+
+          // 4. 检查跨用户数据污染
+          allTodoKeys.forEach(key => {
+            if (key !== currentUserKey) {
+              try {
+                const otherUserTodos = JSON.parse(localStorage.getItem(key) || '[]');
+                const contaminatedTodos = otherUserTodos.filter((todo: any) =>
+                  todo.user === currentUserId
+                );
+
+                if (contaminatedTodos.length > 0) {
+                  issues.push(`🚨 CRITICAL: Found ${contaminatedTodos.length} contaminated todos in ${key}`);
+                  console.error(`🚨 CRITICAL: Data contamination in ${key}:`, contaminatedTodos);
+                }
+              } catch (error) {
+                warnings.push(`⚠️ Error checking ${key}: ${error}`);
+              }
+            }
+          });
+
+          // 5. 检查当前显示的todos是否都属于当前用户
+          const displayedTodos = todos;
+          const wrongOwnershipTodos = displayedTodos.filter(todo =>
+            todo.user && todo.user !== currentUserId
+          );
+
+          if (wrongOwnershipTodos.length > 0) {
+            issues.push(`🚨 CRITICAL: ${wrongOwnershipTodos.length} displayed todos don't belong to current user`);
+            console.error('🚨 CRITICAL: Wrong ownership todos displayed:', wrongOwnershipTodos);
+          }
+
+          // 6. 检查注册用户数据完整性
+          const registeredUsers = JSON.parse(localStorage.getItem('registeredUsers') || '[]');
+          const currentUserRecord = registeredUsers.find((u: any) =>
+            u.id === currentUserId || u.email === user?.email
+          );
+
+          if (!currentUserRecord) {
+            warnings.push('⚠️ Current user not found in registered users list');
+          }
+
+          const securityReport = {
+            timestamp: new Date().toISOString(),
+            currentUser: currentUserId,
+            status: issues.length > 0 ? '🚨 SECURITY BREACH DETECTED' : '✅ SECURE',
+            criticalIssues: issues,
+            warnings: warnings,
+            dataKeys: {
+              currentUserKey,
+              allTodoKeys,
+              hasGlobalTodos: !!globalTodos,
+            },
+            displayedTodos: {
+              total: displayedTodos.length,
+              wrongOwnership: wrongOwnershipTodos.length,
+            },
+            registeredUsers: {
+              total: registeredUsers.length,
+              currentUserFound: !!currentUserRecord,
+            },
+          };
+
+          console.log('🚨 EMERGENCY DATA ISOLATION SECURITY REPORT:', securityReport);
+
+          if (issues.length > 0) {
+            console.error('🚨 IMMEDIATE ACTION REQUIRED: Critical security issues detected!');
+            console.error('Issues:', issues);
+          }
+
+          return securityReport;
+        },
+        // 🔧 自动修复数据隔离问题
+        autoFixDataIsolationIssues: () => {
+          console.log('🔧 AUTO-FIX: Starting automatic data isolation repair');
+
+          const currentUserId = user?._id || user?.email;
+          if (!currentUserId) {
+            console.warn('⚠️ Cannot auto-fix: No current user');
+            return { success: false, message: 'No current user' };
+          }
+
+          let fixedIssues = 0;
+          const fixLog: string[] = [];
+
+          // 1. 移除全局todos数据
+          const globalTodos = localStorage.getItem('todos');
+          if (globalTodos) {
+            localStorage.removeItem('todos');
+            fixedIssues++;
+            fixLog.push('✅ Removed global todos data');
+            console.log('🔧 Fixed: Removed global todos data');
+          }
+
+          // 2. 清理跨用户数据污染
+          const allTodoKeys = Object.keys(localStorage).filter(key => key.startsWith('todos_'));
+          const currentUserKey = `todos_${currentUserId}`;
+
+          allTodoKeys.forEach(key => {
+            if (key !== currentUserKey) {
+              try {
+                const otherUserTodos = JSON.parse(localStorage.getItem(key) || '[]');
+                const cleanTodos = otherUserTodos.filter((todo: any) =>
+                  todo.user !== currentUserId
+                );
+
+                if (cleanTodos.length !== otherUserTodos.length) {
+                  localStorage.setItem(key, JSON.stringify(cleanTodos));
+                  fixedIssues++;
+                  fixLog.push(`✅ Cleaned contaminated data from ${key}`);
+                  console.log(`🔧 Fixed: Cleaned contaminated data from ${key}`);
+                }
+              } catch (error) {
+                console.error(`Error fixing ${key}:`, error);
+              }
+            }
+          });
+
+          // 3. 确保当前显示的todos都属于当前用户
+          const displayedTodos = todos;
+          const correctTodos = displayedTodos.filter(todo =>
+            !todo.user || todo.user === currentUserId
+          ).map(todo => ({
+            ...todo,
+            user: currentUserId,
+          }));
+
+          if (correctTodos.length !== displayedTodos.length) {
+            setTodos(correctTodos);
+            saveUserTodos(correctTodos);
+            fixedIssues++;
+            fixLog.push('✅ Fixed displayed todos ownership');
+            console.log('🔧 Fixed: Corrected displayed todos ownership');
+          }
+
+          // 4. 重新验证数据隔离
+          validateUserDataIsolation();
+
+          const result = {
+            success: true,
+            fixedIssues,
+            fixLog,
+            message: `Auto-fix completed: ${fixedIssues} issues resolved`,
+          };
+
+          console.log('🔧 AUTO-FIX COMPLETED:', result);
+          return result;
+        }
+      };
+      console.log('🛠️ Debug tools available: window.todoDebug');
+    }
+  }, [user, getUserTodosKey]);
+
 
 
   const getViewIcon = (view: string) => {
@@ -177,6 +1093,14 @@ const MainContent: React.FC<MainContentProps> = ({ currentView, onTodosUpdate })
       'flagged': 'flag',
       'tasks': 'task_alt',
     };
+
+    // Handle custom lists
+    if (view.startsWith('custom-')) {
+      const customLists = JSON.parse(localStorage.getItem('customLists') || '[]');
+      const customList = customLists.find((list: any) => list.id === view);
+      return customList ? customList.icon : 'list_alt';
+    }
+
     return icons[view as keyof typeof icons] || 'list_alt';
   };
 
@@ -190,11 +1114,11 @@ const MainContent: React.FC<MainContentProps> = ({ currentView, onTodosUpdate })
         600: '#2563eb'
       },
       'important': {
-        50: '#fefce8',
-        100: '#fef9c3',
-        200: '#fef08a',
-        500: '#eab308',
-        600: '#ca8a04'
+        50: '#fef2f2',
+        100: '#fee2e2',
+        200: '#fecaca',
+        500: '#ef4444',
+        600: '#dc2626'
       },
       'planned': {
         50: '#eff6ff',
@@ -225,7 +1149,25 @@ const MainContent: React.FC<MainContentProps> = ({ currentView, onTodosUpdate })
         600: '#9333ea'
       }
     };
-    return themes[view as keyof typeof themes] || themes.planned;
+
+    // Handle custom lists
+    if (view.startsWith('custom-')) {
+      const customLists = JSON.parse(localStorage.getItem('customLists') || '[]');
+      const customList = customLists.find((list: any) => list.id === view);
+      if (customList) {
+        // Map custom list colors to theme colors
+        const colorMap = {
+          blue: themes['my-day'],
+          green: themes['assigned'],
+          yellow: themes['flagged'],
+          purple: themes['tasks'],
+          red: themes['important']
+        };
+        return colorMap[customList.color as keyof typeof colorMap] || themes.tasks;
+      }
+    }
+
+    return themes[view as keyof typeof themes] || themes.tasks;
   };
 
   const toggleTodo = async (id: string) => {
@@ -245,9 +1187,9 @@ const MainContent: React.FC<MainContentProps> = ({ currentView, onTodosUpdate })
     );
     setTodos(updatedTodos);
 
-    // 保存到localStorage
-    localStorage.setItem('todos', JSON.stringify(updatedTodos));
-    console.log('Saved to localStorage:', updatedTodos);
+    // 保存到用户专属的localStorage
+    saveUserTodos(updatedTodos);
+    console.log('Saved to user-specific localStorage:', updatedTodos);
 
     // 显示成功消息
     message.success(`任务已标记为${newStatus === 'completed' ? '完成' : '待办'}`);
@@ -266,6 +1208,7 @@ const MainContent: React.FC<MainContentProps> = ({ currentView, onTodosUpdate })
     }
   };
 
+  // ⭐ 功能1：重要待办栏的星标同步机制
   const toggleStar = async (id: string) => {
     const todo = todos.find(t => t._id === id);
     if (!todo) {
@@ -275,7 +1218,7 @@ const MainContent: React.FC<MainContentProps> = ({ currentView, onTodosUpdate })
 
     const newStarred = !todo.isStarred;
 
-    console.log(`Toggling star for todo ${id} from ${todo.isStarred} to ${newStarred}`);
+    console.log(`⭐ Toggling star for todo "${todo.title}" (${id}) from ${todo.isStarred} to ${newStarred}`);
 
     // 立即更新本地状态以提供即时反馈
     const updatedTodos = todos.map(t =>
@@ -283,12 +1226,25 @@ const MainContent: React.FC<MainContentProps> = ({ currentView, onTodosUpdate })
     );
     setTodos(updatedTodos);
 
-    // 保存到localStorage
-    localStorage.setItem('todos', JSON.stringify(updatedTodos));
-    console.log('Star state saved to localStorage:', updatedTodos);
+    // 保存到用户专属的localStorage
+    saveUserTodos(updatedTodos);
+    console.log('⭐ Star state saved to user-specific localStorage');
 
-    // 显示成功消息
-    message.success(`任务已${newStarred ? '添加到' : '移出'}重要列表`);
+    // ⭐ 增强的用户反馈消息
+    if (newStarred) {
+      message.success(`⭐ "${todo.title}" 已添加到重要待办栏`);
+      console.log(`⭐ Task "${todo.title}" is now starred and will appear in Important view`);
+    } else {
+      message.info(`"${todo.title}" 已从重要待办栏中移除`);
+      console.log(`⭐ Task "${todo.title}" is no longer starred and will be removed from Important view`);
+    }
+
+    // ⭐ 星标同步机制：确保重要待办栏实时更新
+    // 由于我们使用的是响应式状态管理，filteredTodos会自动重新计算
+    // 当前视图如果是"重要"，会立即反映星标状态的变化
+    if (currentView === 'important') {
+      console.log('⭐ Currently in Important view - changes will be immediately visible');
+    }
 
     // 可选：尝试更新后端（不阻塞本地功能）
     if (token) {
@@ -296,7 +1252,7 @@ const MainContent: React.FC<MainContentProps> = ({ currentView, onTodosUpdate })
         await axios.put(`${API_URL}/todos/${id}`, { isStarred: newStarred }, {
           headers: { Authorization: `Bearer ${token}` },
         });
-        console.log('Star state synced to backend successfully');
+        console.log('⭐ Star state synced to backend successfully');
       } catch (error) {
         console.log('Backend sync failed for star toggle, but local state is preserved:', error);
         // 不回滚本地状态，因为本地操作已经成功
@@ -313,17 +1269,59 @@ const MainContent: React.FC<MainContentProps> = ({ currentView, onTodosUpdate })
     // 使用选择的日期或默认为明天
     const taskDueDate = selectedDate || dayjs().add(1, 'day').toISOString();
 
+    // Assign task properties based on current view
+    let taskProperties = {
+      isStarred: false,
+      category: undefined as string | undefined,
+      dueDate: taskDueDate,
+      viewCategory: currentView, // Add explicit view category
+    };
+
+    switch (currentView) {
+      case 'important':
+        // ⭐ 功能1：在重要待办栏中创建的新待办事项自动设置为星标
+        taskProperties.isStarred = true;
+        taskProperties.viewCategory = 'important';
+        console.log('⭐ Creating task in Important view - automatically starred');
+        break;
+      case 'my-day':
+        taskProperties.dueDate = dayjs().toISOString(); // Today
+        taskProperties.viewCategory = 'my-day';
+        break;
+      case 'planned':
+        // Use selected date or tomorrow
+        taskProperties.dueDate = selectedDate || dayjs().add(1, 'day').toISOString();
+        taskProperties.viewCategory = 'planned';
+        break;
+      case 'assigned':
+        // Task assigned to current user (default behavior)
+        taskProperties.viewCategory = 'assigned';
+        break;
+      case 'tasks':
+        taskProperties.viewCategory = 'tasks';
+        break;
+      default:
+        if (currentView.startsWith('custom-')) {
+          taskProperties.category = currentView;
+          taskProperties.viewCategory = currentView;
+        } else {
+          taskProperties.viewCategory = 'tasks'; // Default fallback
+        }
+        break;
+    }
+
     const newTodo = {
       _id: Date.now().toString(), // 临时ID
       user: user?._id || '',
       title: newTaskInput,
       description: reminderTime ? `提醒: ${reminderTime}` : '',
-      dueDate: taskDueDate,
+      dueDate: taskProperties.dueDate,
       priority: 'medium' as const,
       status: 'pending' as const,
       isAIGenerated: false,
-      isStarred: false,
-      category: currentView.startsWith('custom-') ? currentView : undefined,
+      isStarred: taskProperties.isStarred,
+      category: taskProperties.category,
+      viewCategory: taskProperties.viewCategory,
     };
 
     // 立即添加到本地状态以提供即时反馈
@@ -337,10 +1335,17 @@ const MainContent: React.FC<MainContentProps> = ({ currentView, onTodosUpdate })
     setShowDatePicker(false);
     setShowReminderPicker(false);
 
-    // 保存到localStorage
-    localStorage.setItem('todos', JSON.stringify(updatedTodos));
+    // 保存到用户专属的localStorage
+    saveUserTodos(updatedTodos);
 
-    message.success('任务创建成功!');
+    // ⭐ 功能1：根据视图提供特定的成功消息
+    if (currentView === 'important') {
+      message.success('⭐ 重要任务创建成功！已自动标记为星标');
+    } else if (currentView === 'my-day') {
+      message.success('📅 今日任务创建成功！');
+    } else {
+      message.success('任务创建成功!');
+    }
 
     try {
       // 尝试同步到后端
@@ -361,7 +1366,7 @@ const MainContent: React.FC<MainContentProps> = ({ currentView, onTodosUpdate })
           t._id === newTodo._id ? { ...newTodo, _id: response.data._id } : t
         );
         setTodos(finalTodos);
-        localStorage.setItem('todos', JSON.stringify(finalTodos));
+        saveUserTodos(finalTodos);
       }
 
       console.log('Task synced to backend successfully');
@@ -377,31 +1382,58 @@ const MainContent: React.FC<MainContentProps> = ({ currentView, onTodosUpdate })
       return;
     }
 
-    // Get API key securely
-    const apiKey = getApiKeyWithPrompt();
-    if (!apiKey) {
-      message.error('请先在设置中配置您的SiliconFlow API密钥');
+    // 🔑 使用双重API密钥机制
+    console.log('🔑 Starting AI generation with dual API key mechanism...');
+    const apiKeyResult = getAiApiKey();
+
+    if (!apiKeyResult) {
+      message.error('AI功能暂时不可用，请配置个人API密钥或联系管理员');
       setShowSettings(true);
       return;
     }
 
-    console.log('🤖 Using API key:', sanitizeApiKeyForLogging(apiKey));
+    // 🔑 显示用户友好的API密钥状态信息
+    const keyStatus = getApiKeyStatus();
+    console.log('🔑 API Key Status:', keyStatus.userMessage);
+
+    // 🔑 安全日志记录（不暴露实际密钥）
+    console.log('🤖 AI Generation Details:', {
+      keyType: apiKeyResult.keyType,
+      keySource: apiKeyResult.keySource,
+      userMessage: keyStatus.userMessage,
+      securityNote: 'Actual API key values are never logged'
+    });
 
     setAiLoading(true);
+    setShowAiGeneratingToast(true); // 🤖 显示AI生成提示框
     try {
-      // 调用硅基流动API
+      // 🔑 使用双重机制获取的API密钥调用硅基流动API
       const response = await fetch('https://api.siliconflow.cn/v1/chat/completions', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${apiKey}`,
+          'Authorization': `Bearer ${apiKeyResult.apiKey}`,
         },
         body: JSON.stringify({
-          model: 'deepseek-ai/DeepSeek-R1-0528-Qwen3-8B',
+          model: apiKeyResult.model,
           messages: [
             {
               role: 'system',
-              content: '你是一个专业的任务管理助手。根据用户的自然语言描述，生成具体的、可执行的任务列表。每个任务应该简洁明确，包含具体的行动步骤。请以JSON格式返回任务列表，格式为：{"tasks": [{"title": "任务标题", "description": "任务描述", "priority": "high/medium/low"}]}'
+              content: `你是一个智能任务管理助手。根据用户的自然语言描述，生成具体的、可执行的任务列表。
+
+当前时间: ${new Date().toISOString()}
+今天是: ${new Date().toISOString().split('T')[0]}
+
+时间智能分析规则：
+1. 如果用户提到"今天"、"今日"，设置dueDate为今天
+2. 如果用户提到"明天"、"明日"，设置dueDate为明天
+3. 如果用户提到"下周"、"下个星期"，设置dueDate为下周一
+4. 如果用户提到"紧急"、"急"、"马上"、"立即"，设置dueDate为今天，priority为high
+5. 如果用户提到"重要"、"关键"，priority设置为high
+6. 如果用户提到"不急"、"有空时"、"闲时"，priority设置为low
+7. 如果没有明确时间指示，根据任务性质推断合适的日期
+
+请以JSON格式返回任务列表，格式为：{"tasks": [{"title": "任务标题", "description": "任务描述", "priority": "high/medium/low", "dueDate": "YYYY-MM-DD"}]}`
             },
             {
               role: 'user',
@@ -417,35 +1449,102 @@ const MainContent: React.FC<MainContentProps> = ({ currentView, onTodosUpdate })
         const data = await response.json();
         const aiResponse = data.choices[0]?.message?.content;
 
+        // Assign task properties based on current view for AI tasks (shared logic)
+        const getAiTaskProperties = () => {
+          const taskDueDate = selectedDate || dayjs().add(1, 'day').toISOString();
+          let aiTaskProperties = {
+            isStarred: false,
+            category: undefined as string | undefined,
+            dueDate: taskDueDate,
+            viewCategory: currentView,
+          };
+
+          switch (currentView) {
+            case 'important':
+              aiTaskProperties.isStarred = true;
+              aiTaskProperties.viewCategory = 'important';
+              break;
+            case 'my-day':
+              aiTaskProperties.dueDate = dayjs().toISOString(); // Today
+              aiTaskProperties.viewCategory = 'my-day';
+              break;
+            case 'planned':
+              aiTaskProperties.dueDate = selectedDate || dayjs().add(1, 'day').toISOString();
+              aiTaskProperties.viewCategory = 'planned';
+              break;
+            case 'assigned':
+              aiTaskProperties.viewCategory = 'assigned';
+              break;
+            case 'tasks':
+              aiTaskProperties.viewCategory = 'tasks';
+              break;
+            default:
+              if (currentView.startsWith('custom-')) {
+                aiTaskProperties.category = currentView;
+                aiTaskProperties.viewCategory = currentView;
+              } else {
+                aiTaskProperties.viewCategory = 'tasks';
+              }
+              break;
+          }
+
+          return aiTaskProperties;
+        };
+
         try {
+          // 🔍 调试：记录AI原始响应
+          console.log('🤖 AI Raw Response:', aiResponse);
+          console.log('🤖 AI Response Type:', typeof aiResponse);
+          console.log('🤖 AI Response Length:', aiResponse?.length);
+
           // 尝试解析AI返回的JSON
           const parsedResponse = JSON.parse(aiResponse);
+          console.log('🤖 Parsed AI Response:', parsedResponse);
+
           const aiTasks = parsedResponse.tasks || [];
+          console.log('🤖 Extracted AI Tasks:', aiTasks);
+          console.log('🤖 AI Tasks Count:', aiTasks.length);
 
           if (aiTasks.length > 0) {
-            // 使用选择的日期或默认为明天
-            const taskDueDate = selectedDate || dayjs().add(1, 'day').toISOString();
+            const aiTaskProperties = getAiTaskProperties();
 
             // 为每个AI生成的任务创建todo对象
-            const newTodos = aiTasks.map((task: any, index: number) => ({
-              _id: `ai-${Date.now()}-${index}`,
-              user: user?._id || '',
-              title: task.title || task.name || '未命名任务',
-              description: task.description || (reminderTime ? `提醒: ${reminderTime}` : ''),
-              dueDate: taskDueDate,
-              priority: task.priority || 'medium',
-              status: 'pending' as const,
-              isAIGenerated: true,
-              isStarred: false,
-              category: currentView.startsWith('custom-') ? currentView : undefined,
-            }));
+            const newTodos = aiTasks.map((task: any, index: number) => {
+              // Use AI-determined date if available, otherwise use view-based date
+              let taskDueDate = aiTaskProperties.dueDate;
+              if (task.dueDate) {
+                try {
+                  taskDueDate = dayjs(task.dueDate).toISOString();
+                } catch (error) {
+                  console.warn('Invalid AI date format, using default:', task.dueDate);
+                }
+              }
+
+              return {
+                _id: `ai-${Date.now()}-${index}`,
+                user: user?._id || '',
+                title: task.title || task.name || '未命名任务',
+                description: task.description || (reminderTime ? `提醒: ${reminderTime}` : ''),
+                dueDate: taskDueDate,
+                priority: task.priority || 'medium',
+                status: 'pending' as const,
+                isAIGenerated: true,
+                isStarred: aiTaskProperties.isStarred,
+                category: aiTaskProperties.category,
+                viewCategory: aiTaskProperties.viewCategory,
+              };
+            });
 
             // 添加到现有任务列表
             const updatedTodos = [...todos, ...newTodos];
             setTodos(updatedTodos);
-            localStorage.setItem('todos', JSON.stringify(updatedTodos));
+            saveUserTodos(updatedTodos);
 
-            message.success(`AI成功生成了${newTodos.length}个任务`);
+            // 🔑🤖 根据API密钥类型和模型显示详细的成功消息
+            const keyTypeText = apiKeyResult.keyType === 'personal' ? '个人密钥' : '平台密钥';
+            const modelText = apiKeyResult.model.split('/').pop() || apiKeyResult.model;
+            const successMessage = `AI成功生成了${newTodos.length}个任务（${keyTypeText} - ${modelText}）`;
+            message.success(successMessage);
 
             // 清除输入和设置
             setNewTaskInput('');
@@ -455,26 +1554,31 @@ const MainContent: React.FC<MainContentProps> = ({ currentView, onTodosUpdate })
             setShowReminderPicker(false);
           } else {
             // 如果AI没有返回结构化数据，创建单个任务
-            const taskDueDate = selectedDate || dayjs().add(1, 'day').toISOString();
+            const aiTaskProperties = getAiTaskProperties();
 
             const newTodo = {
               _id: `ai-${Date.now()}`,
               user: user?._id || '',
               title: aiResponse || newTaskInput,
               description: reminderTime ? `AI生成的任务 · 提醒: ${reminderTime}` : 'AI生成的任务',
-              dueDate: taskDueDate,
+              dueDate: aiTaskProperties.dueDate,
               priority: 'medium' as const,
               status: 'pending' as const,
               isAIGenerated: true,
-              isStarred: false,
-              category: currentView.startsWith('custom-') ? currentView : undefined,
+              isStarred: aiTaskProperties.isStarred,
+              category: aiTaskProperties.category,
+              viewCategory: aiTaskProperties.viewCategory,
             };
 
             const updatedTodos = [...todos, newTodo];
             setTodos(updatedTodos);
-            localStorage.setItem('todos', JSON.stringify(updatedTodos));
+            saveUserTodos(updatedTodos);
 
-            message.success('AI生成任务成功');
+            // 🔑🤖 根据API密钥类型和模型显示详细的成功消息
+            const keyTypeText = apiKeyResult.keyType === 'personal' ? '个人密钥' : '平台密钥';
+            const modelText = apiKeyResult.model.split('/').pop() || apiKeyResult.model;
+            const successMessage = `AI生成任务成功（${keyTypeText} - ${modelText}）`;
+            message.success(successMessage);
 
             // 清除输入和设置
             setNewTaskInput('');
@@ -484,27 +1588,103 @@ const MainContent: React.FC<MainContentProps> = ({ currentView, onTodosUpdate })
             setShowReminderPicker(false);
           }
         } catch (parseError) {
-          // 如果解析失败，直接使用AI的回复作为任务标题
-          const taskDueDate = selectedDate || dayjs().add(1, 'day').toISOString();
+          // 🔍 调试：记录解析错误
+          console.warn('🤖 JSON Parse Error:', parseError);
+          console.log('🤖 Attempting alternative parsing methods...');
+
+          // 🔧 尝试修复常见的JSON格式问题
+          let fallbackParsed = null;
+          try {
+            // 尝试清理响应中的markdown代码块标记
+            let cleanedResponse = aiResponse;
+            if (cleanedResponse.includes('```json')) {
+              cleanedResponse = cleanedResponse.replace(/```json\s*/g, '').replace(/```\s*$/g, '');
+            }
+            if (cleanedResponse.includes('```')) {
+              cleanedResponse = cleanedResponse.replace(/```/g, '');
+            }
+
+            console.log('🤖 Cleaned Response:', cleanedResponse);
+            fallbackParsed = JSON.parse(cleanedResponse);
+            console.log('🤖 Fallback Parse Success:', fallbackParsed);
+
+            // 如果成功解析，重新处理
+            const aiTasks = fallbackParsed.tasks || [];
+            if (aiTasks.length > 0) {
+              const aiTaskProperties = getAiTaskProperties();
+
+              const newTodos = aiTasks.map((task: any, index: number) => {
+                let taskDueDate = aiTaskProperties.dueDate;
+                if (task.dueDate) {
+                  try {
+                    taskDueDate = dayjs(task.dueDate).toISOString();
+                  } catch (error) {
+                    console.warn('Invalid AI date format, using default:', task.dueDate);
+                  }
+                }
+
+                return {
+                  _id: `ai-${Date.now()}-${index}`,
+                  user: user?._id || '',
+                  title: task.title || task.name || '未命名任务',
+                  description: task.description || (reminderTime ? `提醒: ${reminderTime}` : ''),
+                  dueDate: taskDueDate,
+                  priority: task.priority || 'medium',
+                  status: 'pending' as const,
+                  isAIGenerated: true,
+                  isStarred: aiTaskProperties.isStarred,
+                  category: aiTaskProperties.category,
+                  viewCategory: aiTaskProperties.viewCategory,
+                };
+              });
+
+              const updatedTodos = [...todos, ...newTodos];
+              setTodos(updatedTodos);
+              saveUserTodos(updatedTodos);
+
+              const keyTypeText = apiKeyResult.keyType === 'personal' ? '个人密钥' : '平台密钥';
+              const modelText = apiKeyResult.model.split('/').pop() || apiKeyResult.model;
+              const successMessage = `AI成功生成了${newTodos.length}个任务（${keyTypeText} - ${modelText}）`;
+              message.success(successMessage);
+
+              setNewTaskInput('');
+              setSelectedDate('');
+              setReminderTime('');
+              setShowDatePicker(false);
+              setShowReminderPicker(false);
+              return; // 成功处理，直接返回
+            }
+          } catch (fallbackError) {
+            console.warn('🤖 Fallback parsing also failed:', fallbackError);
+          }
+
+          // 如果所有解析都失败，直接使用AI的回复作为任务标题
+          console.log('🤖 Using AI response as single task title');
+          const aiTaskProperties = getAiTaskProperties();
 
           const newTodo = {
             _id: `ai-${Date.now()}`,
             user: user?._id || '',
             title: aiResponse || newTaskInput,
             description: reminderTime ? `AI生成的任务 · 提醒: ${reminderTime}` : 'AI生成的任务',
-            dueDate: taskDueDate,
+            dueDate: aiTaskProperties.dueDate,
             priority: 'medium' as const,
             status: 'pending' as const,
             isAIGenerated: true,
-            isStarred: false,
-            category: currentView.startsWith('custom-') ? currentView : undefined,
+            isStarred: aiTaskProperties.isStarred,
+            category: aiTaskProperties.category,
+            viewCategory: aiTaskProperties.viewCategory,
           };
 
           const updatedTodos = [...todos, newTodo];
           setTodos(updatedTodos);
-          localStorage.setItem('todos', JSON.stringify(updatedTodos));
+          saveUserTodos(updatedTodos);
 
-          message.success('AI生成任务成功');
+          // 🔑🤖 根据API密钥类型和模型显示详细的成功消息
+          const keyTypeText = apiKeyResult.keyType === 'personal' ? '个人密钥' : '平台密钥';
+          const modelText = apiKeyResult.model.split('/').pop() || apiKeyResult.model;
+          const successMessage = `AI生成任务成功（${keyTypeText} - ${modelText}）`;
+          message.success(successMessage);
 
           // 清除输入和设置
           setNewTaskInput('');
@@ -522,6 +1702,7 @@ const MainContent: React.FC<MainContentProps> = ({ currentView, onTodosUpdate })
       message.error('AI生成请求失败，请检查网络连接');
     } finally {
       setAiLoading(false);
+      setShowAiGeneratingToast(false); // 🤖 隐藏AI生成提示框
     }
   };
 
@@ -585,7 +1766,7 @@ const MainContent: React.FC<MainContentProps> = ({ currentView, onTodosUpdate })
 
     const updatedTodos = todos.filter(t => t._id !== selectedTaskForDeletion);
     setTodos(updatedTodos);
-    localStorage.setItem('todos', JSON.stringify(updatedTodos));
+    saveUserTodos(updatedTodos);
 
     message.success('任务已删除');
     setSelectedTaskForDeletion(null);
@@ -618,36 +1799,297 @@ const MainContent: React.FC<MainContentProps> = ({ currentView, onTodosUpdate })
     return titles[view as keyof typeof titles] || '任务';
   };
 
+  // 📅 功能2：实时日期更新机制
+  const [currentDate, setCurrentDate] = useState(() => dayjs().startOf('day'));
+
+  // 🔔 功能3：提醒通知系统初始化
+  useEffect(() => {
+    // 初始化音频上下文
+    const initAudio = async () => {
+      try {
+        const ctx = new (window.AudioContext || (window as any).webkitAudioContext)();
+        setAudioContext(ctx);
+
+        // 创建简单的提醒音效
+        const createReminderSound = () => {
+          const sampleRate = ctx.sampleRate;
+          const duration = 0.5; // 0.5秒
+          const buffer = ctx.createBuffer(1, sampleRate * duration, sampleRate);
+          const data = buffer.getChannelData(0);
+
+          // 生成简单的铃声音效
+          for (let i = 0; i < data.length; i++) {
+            const t = i / sampleRate;
+            data[i] = Math.sin(2 * Math.PI * 800 * t) * Math.exp(-t * 3) * 0.3;
+          }
+
+          return buffer;
+        };
+
+        setReminderSound(createReminderSound());
+        console.log('🔔 Audio context initialized for reminders');
+      } catch (error) {
+        console.warn('🔔 Audio initialization failed:', error);
+      }
+    };
+
+    initAudio();
+
+    // 请求通知权限
+    if ('Notification' in window && Notification.permission === 'default') {
+      Notification.requestPermission().then(permission => {
+        if (permission === 'granted') {
+          console.log('🔔 Notification permission granted');
+          message.success('已开启浏览器通知，您将收到待办提醒');
+        } else {
+          console.log('🔔 Notification permission denied');
+          message.info('您可以在浏览器设置中开启通知权限以接收提醒');
+        }
+      });
+    }
+  }, []);
+
+  // 🔔 提醒检查和通知系统
+  useEffect(() => {
+    const checkReminders = () => {
+      const now = new Date();
+
+      todos.forEach(todo => {
+        if (todo.status === 'pending' && todo.description?.includes('提醒:')) {
+          // 解析提醒时间
+          const reminderMatch = todo.description.match(/提醒:\s*(.+?)(?:\s|$)/);
+          if (reminderMatch) {
+            const reminderText = reminderMatch[1];
+            const dueDate = new Date(todo.dueDate);
+
+            // 计算提醒时间
+            let reminderTime = new Date(dueDate);
+
+            if (reminderText.includes('分钟前')) {
+              const minutes = parseInt(reminderText);
+              reminderTime = new Date(dueDate.getTime() - minutes * 60 * 1000);
+            } else if (reminderText.includes('小时前')) {
+              const hours = parseInt(reminderText);
+              reminderTime = new Date(dueDate.getTime() - hours * 60 * 60 * 1000);
+            } else if (reminderText.includes('天前')) {
+              const days = parseInt(reminderText);
+              reminderTime = new Date(dueDate.getTime() - days * 24 * 60 * 60 * 1000);
+            } else if (reminderText.includes('周前')) {
+              const weeks = parseInt(reminderText);
+              reminderTime = new Date(dueDate.getTime() - weeks * 7 * 24 * 60 * 60 * 1000);
+            }
+
+            // 检查是否到了提醒时间（允许1分钟误差）
+            const timeDiff = Math.abs(now.getTime() - reminderTime.getTime());
+            if (timeDiff <= 60000) { // 1分钟内
+              // 检查是否已经提醒过
+              const alreadyNotified = reminderNotifications.some(
+                notification => notification.todo._id === todo._id
+              );
+
+              if (!alreadyNotified) {
+                showReminderNotification(todo);
+              }
+            }
+          }
+        }
+      });
+    };
+
+    // 每30秒检查一次提醒
+    const reminderInterval = setInterval(checkReminders, 30000);
+
+    return () => clearInterval(reminderInterval);
+  }, [todos, reminderNotifications]);
+
+  // 每分钟检查日期变更，确保"我的一天"视图实时更新
+  useEffect(() => {
+    const checkDateChange = () => {
+      const now = dayjs().startOf('day');
+      if (!now.isSame(currentDate, 'day')) {
+        console.log('📅 Date changed, updating My Day view');
+        setCurrentDate(now);
+        if (currentView === 'my-day') {
+          message.info('日期已更新，我的一天视图已刷新');
+        }
+      }
+    };
+
+    // 立即检查一次
+    checkDateChange();
+
+    // 每分钟检查一次日期变更
+    const interval = setInterval(checkDateChange, 60000);
+
+    return () => clearInterval(interval);
+  }, [currentDate, currentView]);
+
+  // 🔔 显示提醒通知
+  const showReminderNotification = (todo: Todo) => {
+    console.log(`🔔 Showing reminder for: "${todo.title}"`);
+
+    // 播放提醒音效
+    if (audioContext && reminderSound) {
+      try {
+        const source = audioContext.createBufferSource();
+        source.buffer = reminderSound;
+        source.connect(audioContext.destination);
+        source.start();
+        console.log('🔔 Reminder sound played');
+      } catch (error) {
+        console.warn('🔔 Failed to play reminder sound:', error);
+      }
+    }
+
+    // 添加到通知列表
+    const notification = {
+      id: `reminder-${todo._id}-${Date.now()}`,
+      todo,
+      timestamp: Date.now()
+    };
+
+    setReminderNotifications(prev => [...prev, notification]);
+
+    // 显示浏览器通知（如果用户允许）
+    if ('Notification' in window && Notification.permission === 'granted') {
+      new Notification(`📋 待办提醒: ${todo.title}`, {
+        body: todo.description?.replace(/提醒:\s*[^,\s]+/, '').trim() || '点击查看详情',
+        icon: '/favicon.ico',
+        tag: todo._id // 防止重复通知
+      });
+    }
+
+    // 显示应用内通知
+    const notificationContent = (
+      <div style={{ maxWidth: '300px' }}>
+        <div style={{ fontWeight: 'bold', marginBottom: '8px' }}>
+          📋 待办提醒
+        </div>
+        <div style={{ marginBottom: '8px' }}>
+          {todo.title}
+        </div>
+        <div style={{ fontSize: '12px', color: '#666', marginBottom: '12px' }}>
+          截止时间: {dayjs(todo.dueDate).format('YYYY-MM-DD HH:mm')}
+        </div>
+        <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
+          <button
+            onClick={() => {
+              // 稍后提醒（5分钟后）
+              const newReminderTime = dayjs().add(5, 'minute').toISOString();
+              const updatedTodos = todos.map(t =>
+                t._id === todo._id
+                  ? { ...t, description: t.description?.replace(/提醒:\s*[^,\s]+/, `提醒: ${newReminderTime}`) }
+                  : t
+              );
+              setTodos(updatedTodos);
+              saveUserTodos(updatedTodos);
+              message.info('已设置5分钟后再次提醒');
+              dismissNotification(notification.id);
+            }}
+            style={{
+              padding: '4px 8px',
+              fontSize: '12px',
+              border: '1px solid #d1d5db',
+              borderRadius: '4px',
+              backgroundColor: 'white',
+              cursor: 'pointer'
+            }}
+          >
+            稍后提醒
+          </button>
+          <button
+            onClick={() => {
+              toggleTodo(todo._id);
+              dismissNotification(notification.id);
+            }}
+            style={{
+              padding: '4px 8px',
+              fontSize: '12px',
+              border: 'none',
+              borderRadius: '4px',
+              backgroundColor: '#10b981',
+              color: 'white',
+              cursor: 'pointer'
+            }}
+          >
+            标记完成
+          </button>
+        </div>
+      </div>
+    );
+
+    message.open({
+      content: notificationContent,
+      duration: 0, // 不自动关闭
+      key: notification.id,
+      style: { marginTop: '60px' }
+    });
+  };
+
+  // 🔔 关闭提醒通知
+  const dismissNotification = (notificationId: string) => {
+    setReminderNotifications(prev =>
+      prev.filter(notification => notification.id !== notificationId)
+    );
+    message.destroy(notificationId);
+  };
+
   // Filter todos based on current view
   const filteredTodos = useMemo(() => {
-    const today = dayjs().startOf('day');
+    const today = currentDate; // 使用实时更新的日期
 
     switch (currentView) {
       case 'my-day':
-        // Tasks due today
+        // 📅 功能2：我的一天待办栏的日期过滤
+        // 显示所有截止日期为当天的待办事项，无论它们在哪个栏目中创建
         return todos.filter(todo => {
           const dueDate = dayjs(todo.dueDate).startOf('day');
-          return dueDate.isSame(today, 'day');
+          const isDueToday = dueDate.isSame(today, 'day');
+
+          if (isDueToday) {
+            console.log(`📅 Including today's task in My Day view: "${todo.title}" (due: ${dueDate.format('YYYY-MM-DD')})`);
+          }
+
+          return isDueToday;
         });
 
       case 'important':
-        // Only starred/important tasks
-        return todos.filter(todo => todo.isStarred);
+        // ⭐ 功能1：重要待办栏显示所有星标任务
+        // 显示所有已星标的任务，无论它们在哪个原始栏目中创建
+        return todos.filter(todo => {
+          const isStarred = todo.isStarred === true;
+          if (isStarred) {
+            console.log(`⭐ Including starred task in Important view: "${todo.title}"`);
+          }
+          return isStarred;
+        });
 
       case 'planned':
-        // Tasks with due dates (excluding overdue tasks)
+        // Only tasks specifically created for "planned" view
         return todos.filter(todo => {
-          const dueDate = dayjs(todo.dueDate).startOf('day');
-          return dueDate.isAfter(today) || dueDate.isSame(today, 'day');
+          if (todo.viewCategory === 'planned') return true;
+          // Fallback: show future tasks if no viewCategory is set (for backward compatibility)
+          if (!todo.viewCategory) {
+            const dueDate = dayjs(todo.dueDate).startOf('day');
+            return dueDate.isAfter(today) || dueDate.isSame(today, 'day');
+          }
+          return false;
         });
 
       case 'assigned':
-        // Tasks assigned to current user (all tasks for now since we don't have assignment logic)
-        return todos.filter(todo => todo.user === user?._id);
+        // Only tasks specifically created for "assigned" view
+        return todos.filter(todo => {
+          if (todo.viewCategory === 'assigned') return true;
+          // Fallback: show user's tasks if no viewCategory is set (for backward compatibility)
+          if (!todo.viewCategory && todo.user === user?._id) return true;
+          return false;
+        });
 
       case 'tasks':
-        // All tasks
-        return todos;
+        // Only tasks specifically created for "tasks" view OR tasks without viewCategory
+        return todos.filter(todo => {
+          return todo.viewCategory === 'tasks' || !todo.viewCategory;
+        });
 
       default:
         // Check if it's a custom list
@@ -655,8 +2097,8 @@ const MainContent: React.FC<MainContentProps> = ({ currentView, onTodosUpdate })
           // For custom lists, show tasks that have the custom list ID in their category
           return todos.filter(todo => todo.category === currentView);
         }
-        // Default to all tasks
-        return todos;
+        // Default to tasks view
+        return todos.filter(todo => todo.viewCategory === 'tasks' || !todo.viewCategory);
     }
   }, [todos, currentView, user]);
 
@@ -674,6 +2116,7 @@ const MainContent: React.FC<MainContentProps> = ({ currentView, onTodosUpdate })
   // Debug function to test all functionality
   const runDebugTest = () => {
     console.log('🧪 Running debug test...');
+    console.log('Current view:', currentView);
     console.log('Current todos:', todos);
     console.log('Filtered todos:', filteredTodos);
     console.log('Pending todos:', pendingTodos);
@@ -681,7 +2124,20 @@ const MainContent: React.FC<MainContentProps> = ({ currentView, onTodosUpdate })
     console.log('Selected date:', selectedDate);
     console.log('Reminder time:', reminderTime);
     console.log('New task input:', newTaskInput);
-    console.log('localStorage todos:', localStorage.getItem('todos'));
+    console.log('localStorage user todos:', localStorage.getItem(getUserTodosKey()));
+
+    // Test filtering logic
+    console.log('🔍 Filtering test:');
+    todos.forEach(todo => {
+      console.log(`Task "${todo.title}":`, {
+        isStarred: todo.isStarred,
+        category: todo.category,
+        dueDate: todo.dueDate,
+        status: todo.status,
+        user: todo.user
+      });
+    });
+
     message.info('Debug info logged to console');
   };
 
@@ -695,10 +2151,28 @@ const MainContent: React.FC<MainContentProps> = ({ currentView, onTodosUpdate })
       }}
     >
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
-        <h1 style={{ fontSize: '24px', fontWeight: '600', color: theme[600], display: 'flex', alignItems: 'center', margin: 0 }}>
-          <span className="material-icons" style={{ marginRight: '8px', color: theme[600], fontSize: '28px' }}>{getViewIcon(currentView)}</span>
-          {getViewTitle(currentView)}
-        </h1>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+          <h1 style={{ fontSize: '24px', fontWeight: '600', color: theme[600], display: 'flex', alignItems: 'center', margin: 0 }}>
+            <span className="material-icons" style={{ marginRight: '8px', color: theme[600], fontSize: '28px' }}>{getViewIcon(currentView)}</span>
+            {getViewTitle(currentView)}
+          </h1>
+          {deleteMode && (
+            <span style={{
+              backgroundColor: '#fef2f2',
+              color: '#dc2626',
+              padding: '4px 8px',
+              borderRadius: '12px',
+              fontSize: '12px',
+              fontWeight: '500',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '4px'
+            }}>
+              <span className="material-icons" style={{ fontSize: '14px' }}>delete</span>
+              删除模式
+            </span>
+          )}
+        </div>
         <div style={{ position: 'relative' }}>
           <button
             onClick={() => setShowSettings(true)}
@@ -787,31 +2261,31 @@ const MainContent: React.FC<MainContentProps> = ({ currentView, onTodosUpdate })
 
               <button
                 onClick={() => {
-                  if (pendingTodos.length > 0) {
-                    handleDeleteTask(pendingTodos[0]._id);
-                  } else {
-                    message.warning('没有可删除的任务');
-                  }
+                  setDeleteMode(!deleteMode);
+                  setShowMoreOptions(false);
+                  message.info(deleteMode ? '已退出删除模式' : '已进入删除模式，点击任务右侧的红色按钮删除任务');
                 }}
                 style={{
                   width: '100%',
                   padding: '8px 12px',
                   border: 'none',
-                  backgroundColor: 'transparent',
+                  backgroundColor: deleteMode ? '#fef2f2' : 'transparent',
                   borderRadius: '4px',
                   cursor: 'pointer',
                   fontSize: '14px',
                   textAlign: 'left',
-                  color: '#dc2626',
+                  color: deleteMode ? '#dc2626' : '#6b7280',
                   display: 'flex',
                   alignItems: 'center',
                   gap: '8px'
                 }}
-                onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#fef2f2'}
-                onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
+                onMouseEnter={(e) => e.currentTarget.style.backgroundColor = deleteMode ? '#fecaca' : '#f3f4f6'}
+                onMouseLeave={(e) => e.currentTarget.style.backgroundColor = deleteMode ? '#fef2f2' : 'transparent'}
               >
-                <span className="material-icons" style={{ fontSize: '16px' }}>delete</span>
-                删除待办
+                <span className="material-icons" style={{ fontSize: '16px' }}>
+                  {deleteMode ? 'delete_forever' : 'delete'}
+                </span>
+                {deleteMode ? '退出删除模式' : '删除任务'}
               </button>
             </div>
           )}
@@ -882,20 +2356,46 @@ const MainContent: React.FC<MainContentProps> = ({ currentView, onTodosUpdate })
                   {todo.isAIGenerated && ' · AI生成'}
                 </p>
               </div>
-              <button
-                onClick={() => toggleStar(todo._id)}
-                style={{
-                  backgroundColor: 'transparent',
-                  border: 'none',
-                  cursor: 'pointer',
-                  color: todo.isStarred ? theme[500] : '#9ca3af',
-                  padding: '4px'
-                }}
-                className="material-icons"
-                title={todo.isStarred ? '移出重要列表' : '添加到重要列表'}
-              >
-                {todo.isStarred ? 'star' : 'star_border'}
-              </button>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                <button
+                  onClick={() => toggleStar(todo._id)}
+                  style={{
+                    backgroundColor: 'transparent',
+                    border: 'none',
+                    cursor: 'pointer',
+                    color: todo.isStarred ? theme[500] : '#9ca3af',
+                    padding: '4px'
+                  }}
+                  className="material-icons"
+                  title={todo.isStarred ? '移出重要列表' : '添加到重要列表'}
+                >
+                  {todo.isStarred ? 'star' : 'star_border'}
+                </button>
+                {deleteMode && (
+                  <button
+                    onClick={() => handleDeleteTask(todo._id)}
+                    style={{
+                      backgroundColor: 'transparent',
+                      border: 'none',
+                      cursor: 'pointer',
+                      color: '#dc2626',
+                      padding: '4px',
+                      borderRadius: '4px',
+                      transition: 'all 0.2s'
+                    }}
+                    className="material-icons"
+                    title="删除任务"
+                    onMouseEnter={(e) => {
+                      e.currentTarget.style.backgroundColor = '#fef2f2';
+                    }}
+                    onMouseLeave={(e) => {
+                      e.currentTarget.style.backgroundColor = 'transparent';
+                    }}
+                  >
+                    delete
+                  </button>
+                )}
+              </div>
             </div>
           ))}
 
@@ -973,20 +2473,46 @@ const MainContent: React.FC<MainContentProps> = ({ currentView, onTodosUpdate })
                         {todo.isAIGenerated && ' · AI生成'}
                       </p>
                     </div>
-                    <button
-                      onClick={() => toggleStar(todo._id)}
-                      style={{
-                        backgroundColor: 'transparent',
-                        border: 'none',
-                        cursor: 'pointer',
-                        color: todo.isStarred ? theme[500] : '#9ca3af',
-                        padding: '4px'
-                      }}
-                      className="material-icons"
-                      title={todo.isStarred ? '移出重要列表' : '添加到重要列表'}
-                    >
-                      {todo.isStarred ? 'star' : 'star_border'}
-                    </button>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                      <button
+                        onClick={() => toggleStar(todo._id)}
+                        style={{
+                          backgroundColor: 'transparent',
+                          border: 'none',
+                          cursor: 'pointer',
+                          color: todo.isStarred ? theme[500] : '#9ca3af',
+                          padding: '4px'
+                        }}
+                        className="material-icons"
+                        title={todo.isStarred ? '移出重要列表' : '添加到重要列表'}
+                      >
+                        {todo.isStarred ? 'star' : 'star_border'}
+                      </button>
+                      {deleteMode && (
+                        <button
+                          onClick={() => handleDeleteTask(todo._id)}
+                          style={{
+                            backgroundColor: 'transparent',
+                            border: 'none',
+                            cursor: 'pointer',
+                            color: '#dc2626',
+                            padding: '4px',
+                            borderRadius: '4px',
+                            transition: 'all 0.2s'
+                          }}
+                          className="material-icons"
+                          title="删除任务"
+                          onMouseEnter={(e) => {
+                            e.currentTarget.style.backgroundColor = '#fef2f2';
+                          }}
+                          onMouseLeave={(e) => {
+                            e.currentTarget.style.backgroundColor = 'transparent';
+                          }}
+                        >
+                          delete
+                        </button>
+                      )}
+                    </div>
                   </div>
                 ))}
               </div>
@@ -998,7 +2524,16 @@ const MainContent: React.FC<MainContentProps> = ({ currentView, onTodosUpdate })
       </div>
 
       {/* Add Task Input */}
-      <div style={{ display: 'flex', flexDirection: 'column', padding: '8px 12px', position: 'relative' }}>
+      <div style={{
+        display: 'flex',
+        flexDirection: 'column',
+        padding: '8px 12px',
+        position: 'relative',
+        zIndex: 1,
+        backgroundColor: theme[50],
+        borderRadius: '8px',
+        border: `1px solid ${theme[200]}`
+      }}>
         {/* Settings indicators */}
         {(selectedDate || reminderTime) && (
           <div style={{ display: 'flex', gap: '8px', marginBottom: '8px', fontSize: '12px', color: '#6b7280' }}>
@@ -1049,9 +2584,11 @@ const MainContent: React.FC<MainContentProps> = ({ currentView, onTodosUpdate })
             type="text"
             value={newTaskInput}
             onChange={(e) => setNewTaskInput(e.target.value)}
-            onKeyPress={(e) => e.key === 'Enter' && addTask()}
+            onKeyDown={(e) => e.key === 'Enter' && addTask()}
           />
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginLeft: 'auto' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginLeft: 'auto', position: 'relative' }}>
+            {/* 🔧 为日期按钮创建独立的相对定位容器 */}
+            <div style={{ position: 'relative' }}>
           <button
             style={{
               color: aiLoading ? theme[500] : '#6b7280',
@@ -1082,54 +2619,283 @@ const MainContent: React.FC<MainContentProps> = ({ currentView, onTodosUpdate })
               {aiLoading ? 'hourglass_empty' : 'auto_awesome'}
             </span>
           </button>
-          <button
-            onClick={() => setShowDatePicker(!showDatePicker)}
-            style={{
-              color: selectedDate ? theme[500] : '#6b7280',
-              backgroundColor: selectedDate ? theme[100] : 'transparent',
-              border: 'none',
-              cursor: 'pointer',
-              padding: '4px',
-              borderRadius: '4px',
-              transition: 'all 0.2s'
-            }}
-            title="设置截止日期"
-            onMouseEnter={(e) => {
-              e.currentTarget.style.backgroundColor = theme[100];
-              e.currentTarget.style.color = theme[600];
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.backgroundColor = selectedDate ? theme[100] : 'transparent';
-              e.currentTarget.style.color = selectedDate ? theme[500] : '#6b7280';
-            }}
-          >
-            <span className="material-icons" style={{ fontSize: '18px' }}>calendar_today</span>
-          </button>
-          <button
-            onClick={() => setShowReminderPicker(!showReminderPicker)}
-            style={{
-              color: reminderTime ? theme[500] : '#6b7280',
-              backgroundColor: reminderTime ? theme[100] : 'transparent',
-              border: 'none',
-              cursor: 'pointer',
-              padding: '4px',
-              borderRadius: '4px',
-              transition: 'all 0.2s'
-            }}
-            title="设置提醒"
-            onMouseEnter={(e) => {
-              e.currentTarget.style.backgroundColor = theme[100];
-              e.currentTarget.style.color = theme[600];
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.backgroundColor = reminderTime ? theme[100] : 'transparent';
-              e.currentTarget.style.color = reminderTime ? theme[500] : '#6b7280';
-            }}
-          >
-            <span className="material-icons" style={{ fontSize: '18px' }}>
-              {reminderTime ? 'notifications' : 'notifications_none'}
-            </span>
-          </button>
+              <button
+                onClick={() => {
+                  console.log('🗓️ Date picker button clicked, current state:', showDatePicker);
+                  setShowDatePicker(!showDatePicker);
+                }}
+                style={{
+                  color: selectedDate ? theme[500] : '#6b7280',
+                  backgroundColor: selectedDate ? theme[100] : 'transparent',
+                  border: 'none',
+                  cursor: 'pointer',
+                  padding: '4px',
+                  borderRadius: '4px',
+                  transition: 'all 0.2s'
+                }}
+                title="设置截止日期"
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.backgroundColor = theme[100];
+                  e.currentTarget.style.color = theme[600];
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.backgroundColor = selectedDate ? theme[100] : 'transparent';
+                  e.currentTarget.style.color = selectedDate ? theme[500] : '#6b7280';
+                }}
+              >
+                <span className="material-icons" style={{ fontSize: '18px' }}>calendar_today</span>
+              </button>
+
+              {/* 🗓️ 日期选择器 - 相对于按钮定位 */}
+              {showDatePicker && (
+                <div ref={datePickerRef} style={{
+                  position: 'absolute',
+                  top: 'calc(100% + 8px)', // 按钮下方8px
+                  right: '0', // 与按钮右对齐
+                  backgroundColor: 'white',
+                  border: '1px solid #e5e7eb',
+                  borderRadius: '8px',
+                  padding: '12px',
+                  boxShadow: '0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05)',
+                  zIndex: 1003,
+                  minWidth: '200px',
+                  maxWidth: '250px'
+                }}>
+                  <p style={{ margin: '0 0 8px 0', fontSize: '14px', fontWeight: '500' }}>选择截止日期</p>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                    <button
+                      onClick={() => handleDateSelect(dayjs().toISOString())}
+                      style={{
+                        padding: '8px 12px',
+                        border: 'none',
+                        backgroundColor: '#f9fafb',
+                        borderRadius: '4px',
+                        cursor: 'pointer',
+                        fontSize: '14px',
+                        textAlign: 'left',
+                        transition: 'background-color 0.2s'
+                      }}
+                      onMouseEnter={(e) => e.currentTarget.style.backgroundColor = theme[100]}
+                      onMouseLeave={(e) => e.currentTarget.style.backgroundColor = '#f9fafb'}
+                    >
+                      今天 ({dayjs().format('MM/DD')})
+                    </button>
+                    <button
+                      onClick={() => handleDateSelect(dayjs().add(1, 'day').toISOString())}
+                      style={{
+                        padding: '8px 12px',
+                        border: 'none',
+                        backgroundColor: '#f9fafb',
+                        borderRadius: '4px',
+                        cursor: 'pointer',
+                        fontSize: '14px',
+                        textAlign: 'left',
+                        transition: 'background-color 0.2s'
+                      }}
+                      onMouseEnter={(e) => e.currentTarget.style.backgroundColor = theme[100]}
+                      onMouseLeave={(e) => e.currentTarget.style.backgroundColor = '#f9fafb'}
+                    >
+                      明天 ({dayjs().add(1, 'day').format('MM/DD')})
+                    </button>
+                    <button
+                      onClick={() => handleDateSelect(dayjs().add(7, 'day').toISOString())}
+                      style={{
+                        padding: '8px 12px',
+                        border: 'none',
+                        backgroundColor: '#f9fafb',
+                        borderRadius: '4px',
+                        cursor: 'pointer',
+                        fontSize: '14px',
+                        textAlign: 'left',
+                        transition: 'background-color 0.2s'
+                      }}
+                      onMouseEnter={(e) => e.currentTarget.style.backgroundColor = theme[100]}
+                      onMouseLeave={(e) => e.currentTarget.style.backgroundColor = '#f9fafb'}
+                    >
+                      下周 ({dayjs().add(7, 'day').format('MM/DD')})
+                    </button>
+                    <button
+                      onClick={() => handleDateSelect(dayjs().add(1, 'month').toISOString())}
+                      style={{
+                        padding: '8px 12px',
+                        border: 'none',
+                        backgroundColor: '#f9fafb',
+                        borderRadius: '4px',
+                        cursor: 'pointer',
+                        fontSize: '14px',
+                        textAlign: 'left',
+                        transition: 'background-color 0.2s'
+                      }}
+                      onMouseEnter={(e) => e.currentTarget.style.backgroundColor = theme[100]}
+                      onMouseLeave={(e) => e.currentTarget.style.backgroundColor = '#f9fafb'}
+                    >
+                      下个月 ({dayjs().add(1, 'month').format('MM/DD')})
+                    </button>
+
+                    <hr style={{ margin: '8px 0', border: 'none', borderTop: '1px solid #e5e7eb' }} />
+
+                    <button
+                      onClick={showCustomDateSelector}
+                      style={{
+                        padding: '8px 12px',
+                        border: 'none',
+                        backgroundColor: '#f9fafb',
+                        borderRadius: '4px',
+                        cursor: 'pointer',
+                        fontSize: '14px',
+                        textAlign: 'left',
+                        transition: 'background-color 0.2s',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '8px'
+                      }}
+                      onMouseEnter={(e) => e.currentTarget.style.backgroundColor = theme[100]}
+                      onMouseLeave={(e) => e.currentTarget.style.backgroundColor = '#f9fafb'}
+                    >
+                      <span className="material-icons" style={{ fontSize: '16px' }}>date_range</span>
+                      自定义日期
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* 🔧 为时间按钮创建独立的相对定位容器 */}
+            <div style={{ position: 'relative' }}>
+              <button
+                onClick={() => {
+                  console.log('⏰ Reminder picker button clicked, current state:', showReminderPicker);
+                  setShowReminderPicker(!showReminderPicker);
+                }}
+                style={{
+                  color: reminderTime ? theme[500] : '#6b7280',
+                  backgroundColor: reminderTime ? theme[100] : 'transparent',
+                  border: 'none',
+                  cursor: 'pointer',
+                  padding: '4px',
+                  borderRadius: '4px',
+                  transition: 'all 0.2s'
+                }}
+                title="设置提醒"
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.backgroundColor = theme[100];
+                  e.currentTarget.style.color = theme[600];
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.backgroundColor = reminderTime ? theme[100] : 'transparent';
+                  e.currentTarget.style.color = reminderTime ? theme[500] : '#6b7280';
+                }}
+              >
+                <span className="material-icons" style={{ fontSize: '18px' }}>
+                  {reminderTime ? 'notifications' : 'notifications_none'}
+                </span>
+              </button>
+
+              {/* ⏰ 时间选择器 - 相对于按钮定位 */}
+              {showReminderPicker && (
+                <div ref={reminderPickerRef} style={{
+                  position: 'absolute',
+                  top: 'calc(100% + 8px)', // 按钮下方8px
+                  right: '0', // 与按钮右对齐
+                  backgroundColor: 'white',
+                  border: '1px solid #e5e7eb',
+                  borderRadius: '8px',
+                  padding: '12px',
+                  boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)',
+                  zIndex: 1003,
+                  minWidth: '200px'
+                }}>
+                  <p style={{ margin: '0 0 8px 0', fontSize: '14px', fontWeight: '500' }}>设置提醒</p>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                    <button
+                      onClick={() => handleReminderSelect('5分钟前')}
+                      style={{
+                        padding: '8px 12px',
+                        border: 'none',
+                        backgroundColor: '#f9fafb',
+                        borderRadius: '4px',
+                        cursor: 'pointer',
+                        fontSize: '14px',
+                        textAlign: 'left',
+                        transition: 'background-color 0.2s'
+                      }}
+                      onMouseEnter={(e) => e.currentTarget.style.backgroundColor = theme[100]}
+                      onMouseLeave={(e) => e.currentTarget.style.backgroundColor = '#f9fafb'}
+                    >
+                      5分钟前
+                    </button>
+                    <button
+                      onClick={() => handleReminderSelect('15分钟前')}
+                      style={{
+                        padding: '8px 12px',
+                        border: 'none',
+                        backgroundColor: '#f9fafb',
+                        borderRadius: '4px',
+                        cursor: 'pointer',
+                        fontSize: '14px',
+                        textAlign: 'left',
+                        transition: 'background-color 0.2s'
+                      }}
+                      onMouseEnter={(e) => e.currentTarget.style.backgroundColor = theme[100]}
+                      onMouseLeave={(e) => e.currentTarget.style.backgroundColor = '#f9fafb'}
+                    >
+                      15分钟前
+                    </button>
+                    <button
+                      onClick={() => handleReminderSelect('1小时前')}
+                      style={{
+                        padding: '8px 12px',
+                        border: 'none',
+                        backgroundColor: '#f9fafb',
+                        borderRadius: '4px',
+                        cursor: 'pointer',
+                        fontSize: '14px',
+                        textAlign: 'left',
+                        transition: 'background-color 0.2s'
+                      }}
+                      onMouseEnter={(e) => e.currentTarget.style.backgroundColor = theme[100]}
+                      onMouseLeave={(e) => e.currentTarget.style.backgroundColor = '#f9fafb'}
+                    >
+                      1小时前
+                    </button>
+                    <button
+                      onClick={() => handleReminderSelect('1天前')}
+                      style={{
+                        padding: '8px 12px',
+                        border: 'none',
+                        backgroundColor: '#f9fafb',
+                        borderRadius: '4px',
+                        cursor: 'pointer',
+                        fontSize: '14px',
+                        textAlign: 'left',
+                        transition: 'background-color 0.2s'
+                      }}
+                      onMouseEnter={(e) => e.currentTarget.style.backgroundColor = theme[100]}
+                      onMouseLeave={(e) => e.currentTarget.style.backgroundColor = '#f9fafb'}
+                    >
+                      1天前
+                    </button>
+                    <button
+                      onClick={() => handleReminderSelect('1周前')}
+                      style={{
+                        padding: '8px 12px',
+                        border: 'none',
+                        backgroundColor: '#f9fafb',
+                        borderRadius: '4px',
+                        cursor: 'pointer',
+                        fontSize: '14px',
+                        textAlign: 'left',
+                        transition: 'background-color 0.2s'
+                      }}
+                      onMouseEnter={(e) => e.currentTarget.style.backgroundColor = theme[100]}
+                      onMouseLeave={(e) => e.currentTarget.style.backgroundColor = '#f9fafb'}
+                    >
+                      1周前
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
           <button
             onClick={handleReset}
             style={{
@@ -1157,222 +2923,7 @@ const MainContent: React.FC<MainContentProps> = ({ currentView, onTodosUpdate })
         </div>
       </div>
 
-      {/* 日期选择器 */}
-      {showDatePicker && (
-        <div ref={datePickerRef} style={{
-          position: 'absolute',
-          top: '100%',
-          right: '0',
-          backgroundColor: 'white',
-          border: '1px solid #e5e7eb',
-          borderRadius: '8px',
-          padding: '12px',
-          boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)',
-          zIndex: 1000,
-          minWidth: '200px'
-        }}>
-          <p style={{ margin: '0 0 8px 0', fontSize: '14px', fontWeight: '500' }}>选择截止日期</p>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-            <button
-              onClick={() => handleDateSelect(dayjs().toISOString())}
-              style={{
-                padding: '8px 12px',
-                border: 'none',
-                backgroundColor: '#f9fafb',
-                borderRadius: '4px',
-                cursor: 'pointer',
-                fontSize: '14px',
-                textAlign: 'left',
-                transition: 'background-color 0.2s'
-              }}
-              onMouseEnter={(e) => e.currentTarget.style.backgroundColor = theme[100]}
-              onMouseLeave={(e) => e.currentTarget.style.backgroundColor = '#f9fafb'}
-            >
-              今天 ({dayjs().format('MM/DD')})
-            </button>
-            <button
-              onClick={() => handleDateSelect(dayjs().add(1, 'day').toISOString())}
-              style={{
-                padding: '8px 12px',
-                border: 'none',
-                backgroundColor: '#f9fafb',
-                borderRadius: '4px',
-                cursor: 'pointer',
-                fontSize: '14px',
-                textAlign: 'left',
-                transition: 'background-color 0.2s'
-              }}
-              onMouseEnter={(e) => e.currentTarget.style.backgroundColor = theme[100]}
-              onMouseLeave={(e) => e.currentTarget.style.backgroundColor = '#f9fafb'}
-            >
-              明天 ({dayjs().add(1, 'day').format('MM/DD')})
-            </button>
-            <button
-              onClick={() => handleDateSelect(dayjs().add(7, 'day').toISOString())}
-              style={{
-                padding: '8px 12px',
-                border: 'none',
-                backgroundColor: '#f9fafb',
-                borderRadius: '4px',
-                cursor: 'pointer',
-                fontSize: '14px',
-                textAlign: 'left',
-                transition: 'background-color 0.2s'
-              }}
-              onMouseEnter={(e) => e.currentTarget.style.backgroundColor = theme[100]}
-              onMouseLeave={(e) => e.currentTarget.style.backgroundColor = '#f9fafb'}
-            >
-              下周 ({dayjs().add(7, 'day').format('MM/DD')})
-            </button>
-            <button
-              onClick={() => handleDateSelect(dayjs().add(1, 'month').toISOString())}
-              style={{
-                padding: '8px 12px',
-                border: 'none',
-                backgroundColor: '#f9fafb',
-                borderRadius: '4px',
-                cursor: 'pointer',
-                fontSize: '14px',
-                textAlign: 'left',
-                transition: 'background-color 0.2s'
-              }}
-              onMouseEnter={(e) => e.currentTarget.style.backgroundColor = theme[100]}
-              onMouseLeave={(e) => e.currentTarget.style.backgroundColor = '#f9fafb'}
-            >
-              下个月 ({dayjs().add(1, 'month').format('MM/DD')})
-            </button>
 
-            <hr style={{ margin: '8px 0', border: 'none', borderTop: '1px solid #e5e7eb' }} />
-
-            <button
-              onClick={showCustomDateSelector}
-              style={{
-                padding: '8px 12px',
-                border: 'none',
-                backgroundColor: '#f9fafb',
-                borderRadius: '4px',
-                cursor: 'pointer',
-                fontSize: '14px',
-                textAlign: 'left',
-                transition: 'background-color 0.2s',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '8px'
-              }}
-              onMouseEnter={(e) => e.currentTarget.style.backgroundColor = theme[100]}
-              onMouseLeave={(e) => e.currentTarget.style.backgroundColor = '#f9fafb'}
-            >
-              <span className="material-icons" style={{ fontSize: '16px' }}>date_range</span>
-              自定义日期
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* 提醒选择器 */}
-      {showReminderPicker && (
-        <div ref={reminderPickerRef} style={{
-          position: 'absolute',
-          top: '100%',
-          right: '0',
-          backgroundColor: 'white',
-          border: '1px solid #e5e7eb',
-          borderRadius: '8px',
-          padding: '12px',
-          boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)',
-          zIndex: 1000,
-          minWidth: '200px'
-        }}>
-          <p style={{ margin: '0 0 8px 0', fontSize: '14px', fontWeight: '500' }}>设置提醒</p>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-            <button
-              onClick={() => handleReminderSelect('5分钟前')}
-              style={{
-                padding: '8px 12px',
-                border: 'none',
-                backgroundColor: '#f9fafb',
-                borderRadius: '4px',
-                cursor: 'pointer',
-                fontSize: '14px',
-                textAlign: 'left',
-                transition: 'background-color 0.2s'
-              }}
-              onMouseEnter={(e) => e.currentTarget.style.backgroundColor = theme[100]}
-              onMouseLeave={(e) => e.currentTarget.style.backgroundColor = '#f9fafb'}
-            >
-              5分钟前
-            </button>
-            <button
-              onClick={() => handleReminderSelect('15分钟前')}
-              style={{
-                padding: '8px 12px',
-                border: 'none',
-                backgroundColor: '#f9fafb',
-                borderRadius: '4px',
-                cursor: 'pointer',
-                fontSize: '14px',
-                textAlign: 'left',
-                transition: 'background-color 0.2s'
-              }}
-              onMouseEnter={(e) => e.currentTarget.style.backgroundColor = theme[100]}
-              onMouseLeave={(e) => e.currentTarget.style.backgroundColor = '#f9fafb'}
-            >
-              15分钟前
-            </button>
-            <button
-              onClick={() => handleReminderSelect('1小时前')}
-              style={{
-                padding: '8px 12px',
-                border: 'none',
-                backgroundColor: '#f9fafb',
-                borderRadius: '4px',
-                cursor: 'pointer',
-                fontSize: '14px',
-                textAlign: 'left',
-                transition: 'background-color 0.2s'
-              }}
-              onMouseEnter={(e) => e.currentTarget.style.backgroundColor = theme[100]}
-              onMouseLeave={(e) => e.currentTarget.style.backgroundColor = '#f9fafb'}
-            >
-              1小时前
-            </button>
-            <button
-              onClick={() => handleReminderSelect('1天前')}
-              style={{
-                padding: '8px 12px',
-                border: 'none',
-                backgroundColor: '#f9fafb',
-                borderRadius: '4px',
-                cursor: 'pointer',
-                fontSize: '14px',
-                textAlign: 'left',
-                transition: 'background-color 0.2s'
-              }}
-              onMouseEnter={(e) => e.currentTarget.style.backgroundColor = theme[100]}
-              onMouseLeave={(e) => e.currentTarget.style.backgroundColor = '#f9fafb'}
-            >
-              1天前
-            </button>
-            <button
-              onClick={() => handleReminderSelect('1周前')}
-              style={{
-                padding: '8px 12px',
-                border: 'none',
-                backgroundColor: '#f9fafb',
-                borderRadius: '4px',
-                cursor: 'pointer',
-                fontSize: '14px',
-                textAlign: 'left',
-                transition: 'background-color 0.2s'
-              }}
-              onMouseEnter={(e) => e.currentTarget.style.backgroundColor = theme[100]}
-              onMouseLeave={(e) => e.currentTarget.style.backgroundColor = '#f9fafb'}
-            >
-              1周前
-            </button>
-          </div>
-        </div>
-      )}
 
       {/* Custom Date Picker Modal */}
       {showCustomDatePicker && (
@@ -1536,6 +3087,60 @@ const MainContent: React.FC<MainContentProps> = ({ currentView, onTodosUpdate })
         isOpen={showSettings}
         onClose={() => setShowSettings(false)}
       />
+
+      {/* AI生成中提示框 */}
+      {showAiGeneratingToast && (
+        <div style={{
+          position: 'fixed',
+          top: '20px',
+          right: '20px',
+          backgroundColor: '#10b981', // 绿色背景
+          color: 'white',
+          padding: '12px 16px',
+          borderRadius: '8px',
+          boxShadow: '0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05)',
+          zIndex: 1002,
+          display: 'flex',
+          alignItems: 'center',
+          gap: '8px',
+          fontSize: '14px',
+          fontWeight: '500',
+          animation: 'slideInFromRight 0.3s ease-out'
+        }}>
+          <div style={{
+            width: '16px',
+            height: '16px',
+            border: '2px solid rgba(255, 255, 255, 0.3)',
+            borderTop: '2px solid white',
+            borderRadius: '50%',
+            animation: 'spin 1s linear infinite'
+          }}></div>
+          AI生成中...
+        </div>
+      )}
+
+      {/* 添加CSS动画样式 */}
+      <style>{`
+        @keyframes slideInFromRight {
+          from {
+            transform: translateX(100%);
+            opacity: 0;
+          }
+          to {
+            transform: translateX(0);
+            opacity: 1;
+          }
+        }
+
+        @keyframes spin {
+          from {
+            transform: rotate(0deg);
+          }
+          to {
+            transform: rotate(360deg);
+          }
+        }
+      `}</style>
     </div>
   );
 };
