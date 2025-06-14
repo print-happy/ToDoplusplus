@@ -1460,9 +1460,18 @@ const MainContent: React.FC<MainContentProps> = ({ currentView, onTodosUpdate })
         };
 
         try {
+          // 🔍 调试：记录AI原始响应
+          console.log('🤖 AI Raw Response:', aiResponse);
+          console.log('🤖 AI Response Type:', typeof aiResponse);
+          console.log('🤖 AI Response Length:', aiResponse?.length);
+
           // 尝试解析AI返回的JSON
           const parsedResponse = JSON.parse(aiResponse);
+          console.log('🤖 Parsed AI Response:', parsedResponse);
+
           const aiTasks = parsedResponse.tasks || [];
+          console.log('🤖 Extracted AI Tasks:', aiTasks);
+          console.log('🤖 AI Tasks Count:', aiTasks.length);
 
           if (aiTasks.length > 0) {
             const aiTaskProperties = getAiTaskProperties();
@@ -1547,7 +1556,78 @@ const MainContent: React.FC<MainContentProps> = ({ currentView, onTodosUpdate })
             setShowReminderPicker(false);
           }
         } catch (parseError) {
-          // 如果解析失败，直接使用AI的回复作为任务标题
+          // 🔍 调试：记录解析错误
+          console.warn('🤖 JSON Parse Error:', parseError);
+          console.log('🤖 Attempting alternative parsing methods...');
+
+          // 🔧 尝试修复常见的JSON格式问题
+          let fallbackParsed = null;
+          try {
+            // 尝试清理响应中的markdown代码块标记
+            let cleanedResponse = aiResponse;
+            if (cleanedResponse.includes('```json')) {
+              cleanedResponse = cleanedResponse.replace(/```json\s*/g, '').replace(/```\s*$/g, '');
+            }
+            if (cleanedResponse.includes('```')) {
+              cleanedResponse = cleanedResponse.replace(/```/g, '');
+            }
+
+            console.log('🤖 Cleaned Response:', cleanedResponse);
+            fallbackParsed = JSON.parse(cleanedResponse);
+            console.log('🤖 Fallback Parse Success:', fallbackParsed);
+
+            // 如果成功解析，重新处理
+            const aiTasks = fallbackParsed.tasks || [];
+            if (aiTasks.length > 0) {
+              const aiTaskProperties = getAiTaskProperties();
+
+              const newTodos = aiTasks.map((task: any, index: number) => {
+                let taskDueDate = aiTaskProperties.dueDate;
+                if (task.dueDate) {
+                  try {
+                    taskDueDate = dayjs(task.dueDate).toISOString();
+                  } catch (error) {
+                    console.warn('Invalid AI date format, using default:', task.dueDate);
+                  }
+                }
+
+                return {
+                  _id: `ai-${Date.now()}-${index}`,
+                  user: user?._id || '',
+                  title: task.title || task.name || '未命名任务',
+                  description: task.description || (reminderTime ? `提醒: ${reminderTime}` : ''),
+                  dueDate: taskDueDate,
+                  priority: task.priority || 'medium',
+                  status: 'pending' as const,
+                  isAIGenerated: true,
+                  isStarred: aiTaskProperties.isStarred,
+                  category: aiTaskProperties.category,
+                  viewCategory: aiTaskProperties.viewCategory,
+                };
+              });
+
+              const updatedTodos = [...todos, ...newTodos];
+              setTodos(updatedTodos);
+              saveUserTodos(updatedTodos);
+
+              const keyTypeText = apiKeyResult.keyType === 'personal' ? '个人密钥' : '平台密钥';
+              const modelText = apiKeyResult.model.split('/').pop() || apiKeyResult.model;
+              const successMessage = `AI成功生成了${newTodos.length}个任务（${keyTypeText} - ${modelText}）`;
+              message.success(successMessage);
+
+              setNewTaskInput('');
+              setSelectedDate('');
+              setReminderTime('');
+              setShowDatePicker(false);
+              setShowReminderPicker(false);
+              return; // 成功处理，直接返回
+            }
+          } catch (fallbackError) {
+            console.warn('🤖 Fallback parsing also failed:', fallbackError);
+          }
+
+          // 如果所有解析都失败，直接使用AI的回复作为任务标题
+          console.log('🤖 Using AI response as single task title');
           const aiTaskProperties = getAiTaskProperties();
 
           const newTodo = {
@@ -2236,6 +2316,8 @@ const MainContent: React.FC<MainContentProps> = ({ currentView, onTodosUpdate })
             onKeyPress={(e) => e.key === 'Enter' && addTask()}
           />
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginLeft: 'auto', position: 'relative' }}>
+            {/* 🔧 为日期按钮创建独立的相对定位容器 */}
+            <div style={{ position: 'relative' }}>
           <button
             style={{
               color: aiLoading ? theme[500] : '#6b7280',
@@ -2266,60 +2348,283 @@ const MainContent: React.FC<MainContentProps> = ({ currentView, onTodosUpdate })
               {aiLoading ? 'hourglass_empty' : 'auto_awesome'}
             </span>
           </button>
-          <button
-            onClick={() => {
-              console.log('🗓️ Date picker button clicked, current state:', showDatePicker);
-              setShowDatePicker(!showDatePicker);
-            }}
-            style={{
-              color: selectedDate ? theme[500] : '#6b7280',
-              backgroundColor: selectedDate ? theme[100] : 'transparent',
-              border: 'none',
-              cursor: 'pointer',
-              padding: '4px',
-              borderRadius: '4px',
-              transition: 'all 0.2s'
-            }}
-            title="设置截止日期"
-            onMouseEnter={(e) => {
-              e.currentTarget.style.backgroundColor = theme[100];
-              e.currentTarget.style.color = theme[600];
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.backgroundColor = selectedDate ? theme[100] : 'transparent';
-              e.currentTarget.style.color = selectedDate ? theme[500] : '#6b7280';
-            }}
-          >
-            <span className="material-icons" style={{ fontSize: '18px' }}>calendar_today</span>
-          </button>
-          <button
-            onClick={() => {
-              console.log('⏰ Reminder picker button clicked, current state:', showReminderPicker);
-              setShowReminderPicker(!showReminderPicker);
-            }}
-            style={{
-              color: reminderTime ? theme[500] : '#6b7280',
-              backgroundColor: reminderTime ? theme[100] : 'transparent',
-              border: 'none',
-              cursor: 'pointer',
-              padding: '4px',
-              borderRadius: '4px',
-              transition: 'all 0.2s'
-            }}
-            title="设置提醒"
-            onMouseEnter={(e) => {
-              e.currentTarget.style.backgroundColor = theme[100];
-              e.currentTarget.style.color = theme[600];
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.backgroundColor = reminderTime ? theme[100] : 'transparent';
-              e.currentTarget.style.color = reminderTime ? theme[500] : '#6b7280';
-            }}
-          >
-            <span className="material-icons" style={{ fontSize: '18px' }}>
-              {reminderTime ? 'notifications' : 'notifications_none'}
-            </span>
-          </button>
+              <button
+                onClick={() => {
+                  console.log('🗓️ Date picker button clicked, current state:', showDatePicker);
+                  setShowDatePicker(!showDatePicker);
+                }}
+                style={{
+                  color: selectedDate ? theme[500] : '#6b7280',
+                  backgroundColor: selectedDate ? theme[100] : 'transparent',
+                  border: 'none',
+                  cursor: 'pointer',
+                  padding: '4px',
+                  borderRadius: '4px',
+                  transition: 'all 0.2s'
+                }}
+                title="设置截止日期"
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.backgroundColor = theme[100];
+                  e.currentTarget.style.color = theme[600];
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.backgroundColor = selectedDate ? theme[100] : 'transparent';
+                  e.currentTarget.style.color = selectedDate ? theme[500] : '#6b7280';
+                }}
+              >
+                <span className="material-icons" style={{ fontSize: '18px' }}>calendar_today</span>
+              </button>
+
+              {/* 🗓️ 日期选择器 - 相对于按钮定位 */}
+              {showDatePicker && (
+                <div ref={datePickerRef} style={{
+                  position: 'absolute',
+                  top: 'calc(100% + 8px)', // 按钮下方8px
+                  right: '0', // 与按钮右对齐
+                  backgroundColor: 'white',
+                  border: '1px solid #e5e7eb',
+                  borderRadius: '8px',
+                  padding: '12px',
+                  boxShadow: '0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05)',
+                  zIndex: 1003,
+                  minWidth: '200px',
+                  maxWidth: '250px'
+                }}>
+                  <p style={{ margin: '0 0 8px 0', fontSize: '14px', fontWeight: '500' }}>选择截止日期</p>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                    <button
+                      onClick={() => handleDateSelect(dayjs().toISOString())}
+                      style={{
+                        padding: '8px 12px',
+                        border: 'none',
+                        backgroundColor: '#f9fafb',
+                        borderRadius: '4px',
+                        cursor: 'pointer',
+                        fontSize: '14px',
+                        textAlign: 'left',
+                        transition: 'background-color 0.2s'
+                      }}
+                      onMouseEnter={(e) => e.currentTarget.style.backgroundColor = theme[100]}
+                      onMouseLeave={(e) => e.currentTarget.style.backgroundColor = '#f9fafb'}
+                    >
+                      今天 ({dayjs().format('MM/DD')})
+                    </button>
+                    <button
+                      onClick={() => handleDateSelect(dayjs().add(1, 'day').toISOString())}
+                      style={{
+                        padding: '8px 12px',
+                        border: 'none',
+                        backgroundColor: '#f9fafb',
+                        borderRadius: '4px',
+                        cursor: 'pointer',
+                        fontSize: '14px',
+                        textAlign: 'left',
+                        transition: 'background-color 0.2s'
+                      }}
+                      onMouseEnter={(e) => e.currentTarget.style.backgroundColor = theme[100]}
+                      onMouseLeave={(e) => e.currentTarget.style.backgroundColor = '#f9fafb'}
+                    >
+                      明天 ({dayjs().add(1, 'day').format('MM/DD')})
+                    </button>
+                    <button
+                      onClick={() => handleDateSelect(dayjs().add(7, 'day').toISOString())}
+                      style={{
+                        padding: '8px 12px',
+                        border: 'none',
+                        backgroundColor: '#f9fafb',
+                        borderRadius: '4px',
+                        cursor: 'pointer',
+                        fontSize: '14px',
+                        textAlign: 'left',
+                        transition: 'background-color 0.2s'
+                      }}
+                      onMouseEnter={(e) => e.currentTarget.style.backgroundColor = theme[100]}
+                      onMouseLeave={(e) => e.currentTarget.style.backgroundColor = '#f9fafb'}
+                    >
+                      下周 ({dayjs().add(7, 'day').format('MM/DD')})
+                    </button>
+                    <button
+                      onClick={() => handleDateSelect(dayjs().add(1, 'month').toISOString())}
+                      style={{
+                        padding: '8px 12px',
+                        border: 'none',
+                        backgroundColor: '#f9fafb',
+                        borderRadius: '4px',
+                        cursor: 'pointer',
+                        fontSize: '14px',
+                        textAlign: 'left',
+                        transition: 'background-color 0.2s'
+                      }}
+                      onMouseEnter={(e) => e.currentTarget.style.backgroundColor = theme[100]}
+                      onMouseLeave={(e) => e.currentTarget.style.backgroundColor = '#f9fafb'}
+                    >
+                      下个月 ({dayjs().add(1, 'month').format('MM/DD')})
+                    </button>
+
+                    <hr style={{ margin: '8px 0', border: 'none', borderTop: '1px solid #e5e7eb' }} />
+
+                    <button
+                      onClick={showCustomDateSelector}
+                      style={{
+                        padding: '8px 12px',
+                        border: 'none',
+                        backgroundColor: '#f9fafb',
+                        borderRadius: '4px',
+                        cursor: 'pointer',
+                        fontSize: '14px',
+                        textAlign: 'left',
+                        transition: 'background-color 0.2s',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '8px'
+                      }}
+                      onMouseEnter={(e) => e.currentTarget.style.backgroundColor = theme[100]}
+                      onMouseLeave={(e) => e.currentTarget.style.backgroundColor = '#f9fafb'}
+                    >
+                      <span className="material-icons" style={{ fontSize: '16px' }}>date_range</span>
+                      自定义日期
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* 🔧 为时间按钮创建独立的相对定位容器 */}
+            <div style={{ position: 'relative' }}>
+              <button
+                onClick={() => {
+                  console.log('⏰ Reminder picker button clicked, current state:', showReminderPicker);
+                  setShowReminderPicker(!showReminderPicker);
+                }}
+                style={{
+                  color: reminderTime ? theme[500] : '#6b7280',
+                  backgroundColor: reminderTime ? theme[100] : 'transparent',
+                  border: 'none',
+                  cursor: 'pointer',
+                  padding: '4px',
+                  borderRadius: '4px',
+                  transition: 'all 0.2s'
+                }}
+                title="设置提醒"
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.backgroundColor = theme[100];
+                  e.currentTarget.style.color = theme[600];
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.backgroundColor = reminderTime ? theme[100] : 'transparent';
+                  e.currentTarget.style.color = reminderTime ? theme[500] : '#6b7280';
+                }}
+              >
+                <span className="material-icons" style={{ fontSize: '18px' }}>
+                  {reminderTime ? 'notifications' : 'notifications_none'}
+                </span>
+              </button>
+
+              {/* ⏰ 时间选择器 - 相对于按钮定位 */}
+              {showReminderPicker && (
+                <div ref={reminderPickerRef} style={{
+                  position: 'absolute',
+                  top: 'calc(100% + 8px)', // 按钮下方8px
+                  right: '0', // 与按钮右对齐
+                  backgroundColor: 'white',
+                  border: '1px solid #e5e7eb',
+                  borderRadius: '8px',
+                  padding: '12px',
+                  boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)',
+                  zIndex: 1003,
+                  minWidth: '200px'
+                }}>
+                  <p style={{ margin: '0 0 8px 0', fontSize: '14px', fontWeight: '500' }}>设置提醒</p>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                    <button
+                      onClick={() => handleReminderSelect('5分钟前')}
+                      style={{
+                        padding: '8px 12px',
+                        border: 'none',
+                        backgroundColor: '#f9fafb',
+                        borderRadius: '4px',
+                        cursor: 'pointer',
+                        fontSize: '14px',
+                        textAlign: 'left',
+                        transition: 'background-color 0.2s'
+                      }}
+                      onMouseEnter={(e) => e.currentTarget.style.backgroundColor = theme[100]}
+                      onMouseLeave={(e) => e.currentTarget.style.backgroundColor = '#f9fafb'}
+                    >
+                      5分钟前
+                    </button>
+                    <button
+                      onClick={() => handleReminderSelect('15分钟前')}
+                      style={{
+                        padding: '8px 12px',
+                        border: 'none',
+                        backgroundColor: '#f9fafb',
+                        borderRadius: '4px',
+                        cursor: 'pointer',
+                        fontSize: '14px',
+                        textAlign: 'left',
+                        transition: 'background-color 0.2s'
+                      }}
+                      onMouseEnter={(e) => e.currentTarget.style.backgroundColor = theme[100]}
+                      onMouseLeave={(e) => e.currentTarget.style.backgroundColor = '#f9fafb'}
+                    >
+                      15分钟前
+                    </button>
+                    <button
+                      onClick={() => handleReminderSelect('1小时前')}
+                      style={{
+                        padding: '8px 12px',
+                        border: 'none',
+                        backgroundColor: '#f9fafb',
+                        borderRadius: '4px',
+                        cursor: 'pointer',
+                        fontSize: '14px',
+                        textAlign: 'left',
+                        transition: 'background-color 0.2s'
+                      }}
+                      onMouseEnter={(e) => e.currentTarget.style.backgroundColor = theme[100]}
+                      onMouseLeave={(e) => e.currentTarget.style.backgroundColor = '#f9fafb'}
+                    >
+                      1小时前
+                    </button>
+                    <button
+                      onClick={() => handleReminderSelect('1天前')}
+                      style={{
+                        padding: '8px 12px',
+                        border: 'none',
+                        backgroundColor: '#f9fafb',
+                        borderRadius: '4px',
+                        cursor: 'pointer',
+                        fontSize: '14px',
+                        textAlign: 'left',
+                        transition: 'background-color 0.2s'
+                      }}
+                      onMouseEnter={(e) => e.currentTarget.style.backgroundColor = theme[100]}
+                      onMouseLeave={(e) => e.currentTarget.style.backgroundColor = '#f9fafb'}
+                    >
+                      1天前
+                    </button>
+                    <button
+                      onClick={() => handleReminderSelect('1周前')}
+                      style={{
+                        padding: '8px 12px',
+                        border: 'none',
+                        backgroundColor: '#f9fafb',
+                        borderRadius: '4px',
+                        cursor: 'pointer',
+                        fontSize: '14px',
+                        textAlign: 'left',
+                        transition: 'background-color 0.2s'
+                      }}
+                      onMouseEnter={(e) => e.currentTarget.style.backgroundColor = theme[100]}
+                      onMouseLeave={(e) => e.currentTarget.style.backgroundColor = '#f9fafb'}
+                    >
+                      1周前
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
           <button
             onClick={handleReset}
             style={{
@@ -2347,223 +2652,7 @@ const MainContent: React.FC<MainContentProps> = ({ currentView, onTodosUpdate })
         </div>
       </div>
 
-      {/* 日期选择器 */}
-      {showDatePicker && (
-        <div ref={datePickerRef} style={{
-          position: 'fixed', // 🔧 改为fixed定位确保显示
-          top: '120px', // 🔧 固定位置
-          right: '20px', // 🔧 固定位置
-          backgroundColor: 'white',
-          border: '1px solid #e5e7eb',
-          borderRadius: '8px',
-          padding: '12px',
-          boxShadow: '0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05)',
-          zIndex: 1003, // 🔧 提高z-index
-          minWidth: '200px',
-          maxWidth: '250px'
-        }}>
-          <p style={{ margin: '0 0 8px 0', fontSize: '14px', fontWeight: '500' }}>选择截止日期</p>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-            <button
-              onClick={() => handleDateSelect(dayjs().toISOString())}
-              style={{
-                padding: '8px 12px',
-                border: 'none',
-                backgroundColor: '#f9fafb',
-                borderRadius: '4px',
-                cursor: 'pointer',
-                fontSize: '14px',
-                textAlign: 'left',
-                transition: 'background-color 0.2s'
-              }}
-              onMouseEnter={(e) => e.currentTarget.style.backgroundColor = theme[100]}
-              onMouseLeave={(e) => e.currentTarget.style.backgroundColor = '#f9fafb'}
-            >
-              今天 ({dayjs().format('MM/DD')})
-            </button>
-            <button
-              onClick={() => handleDateSelect(dayjs().add(1, 'day').toISOString())}
-              style={{
-                padding: '8px 12px',
-                border: 'none',
-                backgroundColor: '#f9fafb',
-                borderRadius: '4px',
-                cursor: 'pointer',
-                fontSize: '14px',
-                textAlign: 'left',
-                transition: 'background-color 0.2s'
-              }}
-              onMouseEnter={(e) => e.currentTarget.style.backgroundColor = theme[100]}
-              onMouseLeave={(e) => e.currentTarget.style.backgroundColor = '#f9fafb'}
-            >
-              明天 ({dayjs().add(1, 'day').format('MM/DD')})
-            </button>
-            <button
-              onClick={() => handleDateSelect(dayjs().add(7, 'day').toISOString())}
-              style={{
-                padding: '8px 12px',
-                border: 'none',
-                backgroundColor: '#f9fafb',
-                borderRadius: '4px',
-                cursor: 'pointer',
-                fontSize: '14px',
-                textAlign: 'left',
-                transition: 'background-color 0.2s'
-              }}
-              onMouseEnter={(e) => e.currentTarget.style.backgroundColor = theme[100]}
-              onMouseLeave={(e) => e.currentTarget.style.backgroundColor = '#f9fafb'}
-            >
-              下周 ({dayjs().add(7, 'day').format('MM/DD')})
-            </button>
-            <button
-              onClick={() => handleDateSelect(dayjs().add(1, 'month').toISOString())}
-              style={{
-                padding: '8px 12px',
-                border: 'none',
-                backgroundColor: '#f9fafb',
-                borderRadius: '4px',
-                cursor: 'pointer',
-                fontSize: '14px',
-                textAlign: 'left',
-                transition: 'background-color 0.2s'
-              }}
-              onMouseEnter={(e) => e.currentTarget.style.backgroundColor = theme[100]}
-              onMouseLeave={(e) => e.currentTarget.style.backgroundColor = '#f9fafb'}
-            >
-              下个月 ({dayjs().add(1, 'month').format('MM/DD')})
-            </button>
 
-            <hr style={{ margin: '8px 0', border: 'none', borderTop: '1px solid #e5e7eb' }} />
-
-            <button
-              onClick={showCustomDateSelector}
-              style={{
-                padding: '8px 12px',
-                border: 'none',
-                backgroundColor: '#f9fafb',
-                borderRadius: '4px',
-                cursor: 'pointer',
-                fontSize: '14px',
-                textAlign: 'left',
-                transition: 'background-color 0.2s',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '8px'
-              }}
-              onMouseEnter={(e) => e.currentTarget.style.backgroundColor = theme[100]}
-              onMouseLeave={(e) => e.currentTarget.style.backgroundColor = '#f9fafb'}
-            >
-              <span className="material-icons" style={{ fontSize: '16px' }}>date_range</span>
-              自定义日期
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* 提醒选择器 */}
-      {showReminderPicker && (
-        <div ref={reminderPickerRef} style={{
-          position: 'fixed', // 🔧 改为fixed定位确保显示
-          top: '120px', // 🔧 固定位置
-          right: '240px', // 🔧 固定位置，避免与日期选择器重叠
-          backgroundColor: 'white',
-          border: '1px solid #e5e7eb',
-          borderRadius: '8px',
-          padding: '12px',
-          boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)',
-          zIndex: 1003, // 🔧 提高z-index
-          minWidth: '200px'
-        }}>
-          <p style={{ margin: '0 0 8px 0', fontSize: '14px', fontWeight: '500' }}>设置提醒</p>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-            <button
-              onClick={() => handleReminderSelect('5分钟前')}
-              style={{
-                padding: '8px 12px',
-                border: 'none',
-                backgroundColor: '#f9fafb',
-                borderRadius: '4px',
-                cursor: 'pointer',
-                fontSize: '14px',
-                textAlign: 'left',
-                transition: 'background-color 0.2s'
-              }}
-              onMouseEnter={(e) => e.currentTarget.style.backgroundColor = theme[100]}
-              onMouseLeave={(e) => e.currentTarget.style.backgroundColor = '#f9fafb'}
-            >
-              5分钟前
-            </button>
-            <button
-              onClick={() => handleReminderSelect('15分钟前')}
-              style={{
-                padding: '8px 12px',
-                border: 'none',
-                backgroundColor: '#f9fafb',
-                borderRadius: '4px',
-                cursor: 'pointer',
-                fontSize: '14px',
-                textAlign: 'left',
-                transition: 'background-color 0.2s'
-              }}
-              onMouseEnter={(e) => e.currentTarget.style.backgroundColor = theme[100]}
-              onMouseLeave={(e) => e.currentTarget.style.backgroundColor = '#f9fafb'}
-            >
-              15分钟前
-            </button>
-            <button
-              onClick={() => handleReminderSelect('1小时前')}
-              style={{
-                padding: '8px 12px',
-                border: 'none',
-                backgroundColor: '#f9fafb',
-                borderRadius: '4px',
-                cursor: 'pointer',
-                fontSize: '14px',
-                textAlign: 'left',
-                transition: 'background-color 0.2s'
-              }}
-              onMouseEnter={(e) => e.currentTarget.style.backgroundColor = theme[100]}
-              onMouseLeave={(e) => e.currentTarget.style.backgroundColor = '#f9fafb'}
-            >
-              1小时前
-            </button>
-            <button
-              onClick={() => handleReminderSelect('1天前')}
-              style={{
-                padding: '8px 12px',
-                border: 'none',
-                backgroundColor: '#f9fafb',
-                borderRadius: '4px',
-                cursor: 'pointer',
-                fontSize: '14px',
-                textAlign: 'left',
-                transition: 'background-color 0.2s'
-              }}
-              onMouseEnter={(e) => e.currentTarget.style.backgroundColor = theme[100]}
-              onMouseLeave={(e) => e.currentTarget.style.backgroundColor = '#f9fafb'}
-            >
-              1天前
-            </button>
-            <button
-              onClick={() => handleReminderSelect('1周前')}
-              style={{
-                padding: '8px 12px',
-                border: 'none',
-                backgroundColor: '#f9fafb',
-                borderRadius: '4px',
-                cursor: 'pointer',
-                fontSize: '14px',
-                textAlign: 'left',
-                transition: 'background-color 0.2s'
-              }}
-              onMouseEnter={(e) => e.currentTarget.style.backgroundColor = theme[100]}
-              onMouseLeave={(e) => e.currentTarget.style.backgroundColor = '#f9fafb'}
-            >
-              1周前
-            </button>
-          </div>
-        </div>
-      )}
 
       {/* Custom Date Picker Modal */}
       {showCustomDatePicker && (

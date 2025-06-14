@@ -77,6 +77,25 @@ const Settings: React.FC<SettingsProps> = ({ isOpen, onClose }) => {
         if (success) {
           message.success('API密钥已保存并验证成功');
           console.log('🔒 API key securely stored for current user');
+
+          // 🤖 立即更新AI模型选择状态
+          const canModify = canUserModifyModel();
+          setCanModifyModel(canModify);
+
+          const statusInfo = getApiKeyStatus();
+          setApiKeyStatusInfo(statusInfo);
+
+          console.log('🤖 AI Model settings updated after API key save:', {
+            canModify,
+            currentModel: statusInfo.modelInfo.currentModel,
+            keyType: statusInfo.currentKeyType
+          });
+
+          // 如果现在可以修改模型，显示成功提示
+          if (canModify) {
+            message.success('现在您可以选择AI模型了！');
+          }
+
           onClose();
         } else {
           message.error('API密钥保存失败');
