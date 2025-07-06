@@ -1,5 +1,4 @@
 import express from 'express';
-import jwt from 'jsonwebtoken';
 import bcrypt from 'bcryptjs';
 import { AppDataSource } from '../data-source';
 import { User } from '../entities/User';
@@ -18,12 +17,8 @@ router.post('/register', async (req, res) => {
     const hashed = await bcrypt.hash(password, 10);
     const newUser = userRepo.create({ username, email, password: hashed });
     const saved = await userRepo.save(newUser);
-    const token = jwt.sign(
-      { _id: saved.id },
-      process.env.JWT_SECRET || 'your-secret-key',
-      { expiresIn: '7d' }
-    );
-    res.status(201).json({ user: saved, token });
+    req.session.userId = saved.id;
+    res.status(201).json({ id: saved.id, username: saved.username });
   } catch (error) {
     res.status(400).json({ error: '注册失败' });
   }
@@ -41,12 +36,8 @@ router.post('/login', async (req, res) => {
     if (!isMatch) {
       return res.status(401).json({ error: '邮箱或密码错误' });
     }
-    const token = jwt.sign(
-      { _id: user.id },
-      process.env.JWT_SECRET || 'your-secret-key',
-      { expiresIn: '7d' }
-    );
-    res.json({ user, token });
+    req.session.userId = user.id;
+    res.json({ id: user.id, username: user.username });
   } catch (error) {
     res.status(400).json({ error: '登录失败' });
   }

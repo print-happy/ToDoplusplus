@@ -7,6 +7,9 @@ import cors from 'cors';
 import helmet from 'helmet';
 import dotenv from 'dotenv';
 import rateLimit from 'express-rate-limit';
+import session from 'express-session';
+import connectRedis from 'connect-redis';
+import { createClient } from 'redis';
 
 // 路由导入
 import authRoutes from './routes/auth';
@@ -22,6 +25,19 @@ const app = express();
 app.use(express.json());
 app.use(cors());
 app.use(helmet());
+
+// Redis session store configuration
+const RedisStore = connectRedis(session);
+const redisClient = createClient({ url: process.env.REDIS_URL });
+redisClient.connect().catch(console.error);
+
+app.use(session({
+  store: new RedisStore({ client: redisClient }),
+  secret: process.env.SESSION_SECRET as string,
+  resave: false,
+  saveUninitialized: false,
+  cookie: { secure: false, httpOnly: true, maxAge: 86400000 }
+}));
 
 // 速率限制
 const limiter = rateLimit({

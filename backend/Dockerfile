@@ -1,7 +1,7 @@
 # backend/Dockerfile
 
 # 使用一个官方的 Node.js 镜像作为基础
-FROM node:18-alpine
+FROM node:18-bullseye-slim
 
 # 设置容器内的工作目录
 WORKDIR /app
