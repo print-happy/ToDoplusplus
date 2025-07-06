@@ -1,5 +1,8 @@
 import express from 'express';
-import mongoose from 'mongoose';
+import 'reflect-metadata';
+import { DataSource } from 'typeorm';
+import { User } from './entities/User';
+import { Todo } from './entities/Todo';
 import cors from 'cors';
 import helmet from 'helmet';
 import dotenv from 'dotenv';
@@ -30,14 +33,25 @@ app.use(limiter);
 // 路由
 app.use('/api/auth', authRoutes);
 app.use('/api/todos', todoRoutes);
+// Health check endpoint
+app.get('/health', (req, res) => res.sendStatus(200));
 
-// 数据库连接
-const MONGODB_URI = process.env.MONGODB_URI || 'mongodb://localhost:27017/todolist';
-mongoose.connect(MONGODB_URI)
-  .then(() => console.log('Connected to MongoDB'))
-  .catch((err) => {
-    console.error('MongoDB connection error:', err);
-    console.log('Continuing without database connection for testing...');
+// 数据库连接 (MySQL)
+const AppDataSource = new DataSource({
+  type: 'mysql',
+  host: process.env.MYSQL_HOST,
+  port: Number(process.env.MYSQL_PORT),
+  username: process.env.MYSQL_USER,
+  password: process.env.MYSQL_PASSWORD,
+  database: process.env.MYSQL_DATABASE,
+  entities: [User, Todo],
+  synchronize: true,
+});
+AppDataSource.initialize()
+  .then(() => console.log('Connected to MySQL'))
+  .catch(err => {
+    console.error('MySQL connection error:', err);
+    process.exit(1);
   });
 
 // 启动服务器
